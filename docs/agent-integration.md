@@ -43,7 +43,7 @@ Codex CLI invokes this after each completed turn with a JSON payload as a single
 
 ## The OLED usage dashboard is a separate pipeline
 
-Everything above is about the 12 per-key LEDs, driven by hook events. The OLED's usage dashboard is unrelated: it isn't triggered by hooks at all. Instead the bridge polls `macropad/usage.py` on a timer (`config/usage.yaml`'s `poll_interval_seconds`) and pushes a `{"usage": {...}}` message straight to the MacroPad over the same serial link. See [customization.md](customization.md) for the config and [running-the-bridge.md](running-the-bridge.md) for what the bridge logs while it's running.
+Everything above is about the 12 per-key LEDs, driven by hook events. The OLED's usage dashboard is unrelated: it isn't triggered by hooks at all. Instead the bridge polls `macropad/usage.py`'s `build_display_payload()` on a timer (`config/usage.yaml`'s `poll_interval_seconds`) and pushes a `{"usage": {...}}` message straight to the MacroPad over the same serial link. `build_display_payload()` is itself a small dispatcher over three interchangeable sources (`macropad/usage.py`'s own local-transcript estimate, `macropad/usage_monitor.py`, `macropad/usage_pty.py`) selected by `config/usage.yaml`'s `source:` -- see [customization.md](customization.md) for the tradeoffs between them and [running-the-bridge.md](running-the-bridge.md) for what the bridge logs while it's running.
 
 ## Adding a new state or event
 

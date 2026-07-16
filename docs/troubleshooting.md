@@ -49,15 +49,40 @@ This is partly expected -- see the "Known limitation" note in [agent-integration
 
 ## The OLED usage dashboard is blank or stuck at "0"
 
-1. Check `enabled: true` in `config/usage.yaml` -- and that the bridge log printed `usage display enabled (every Ns)` on startup. If that line is missing, the bridge read `enabled: false` (or the file failed to parse).
-2. Confirm Claude Code has actually written transcripts to scan:
+1. Check `enabled: true` in `config/usage.yaml` -- and that the bridge log printed `usage display enabled (source=..., every Ns)` on startup. If that line is missing, the bridge read `enabled: false` (or the file failed to parse).
+2. Confirm Claude Code has actually written transcripts to scan (this applies to `source: local_estimate`, and to any other source while it's falling back):
 
    ```bash
    uv run python3 -c "from macropad import usage; print(usage.compute_usage())"
    ```
 
    If this prints `{'session_tokens': 0, 'weekly_tokens': 0}` but you know you've used Claude Code recently, check that `~/.claude/projects/` exists and has recently-modified `.jsonl` files under it -- a nonstandard `CLAUDE_CONFIG_DIR` or a Claude Code install that stores state elsewhere would make this always read 0. See [customization.md](customization.md) for the exact fields being parsed.
-3. Remember this is deliberately a *rough* number, not a live "% of quota" unless you've set `session_token_budget`/`weekly_token_budget` yourself -- see [customization.md](customization.md) if the numbers look plausible but the bars never move the way you expect.
+3. Remember `local_estimate` is deliberately a *rough* number, not a live "% of quota" unless you've set `session_token_budget`/`weekly_token_budget` yourself -- see [customization.md](customization.md) if the numbers look plausible but the bars never move the way you expect.
+
+## `source: claude_monitor` never shows real percentages
+
+```bash
+uv run python3 -c "from macropad import usage_monitor; print(usage_monitor.read_monitor_percentages())"
+```
+
+- `None` with no error means either the state file doesn't exist (the monitor tool isn't running, or writes somewhere other than `~/.claude-monitor/state/latest.json` -- set `claude_monitor.state_path` in `config/usage.yaml` if so) or it exists but none of the key names `macropad/usage_monitor.py` looks for were found. Open the file yourself and compare its actual keys against `_SESSION_KEYS`/`_WEEKLY_KEYS` in that module -- we haven't verified this against a live install, so the real schema may differ.
+- Getting `None` here means the bridge is (correctly, silently) falling back to `local_estimate` -- that's not a bug, it's the intended degrade path.
+
+## `source: claude_pty` never shows real percentages
+
+This is the most likely of the three sources to need troubleshooting -- see the "experimental" section in [customization.md](customization.md) for the full tradeoffs. Test it directly and watch what actually happens:
+
+```bash
+uv run python3 -c "
+from macropad import usage_pty
+print(usage_pty.get_usage_percentages(working_dir=None, timeout_seconds=20))
+"
+```
+
+- `None` almost always means `claude` never reached a ready chat prompt within the timeout -- most commonly because the onboarding wizard (theme/login) or a directory-trust prompt was still showing. **Run `claude` by hand** from the same `working_dir` you configured and confirm it goes straight to a normal chat, with no prompts, before this will ever succeed. We verified directly while building this that a fresh, never-used-here `claude` process lands on the onboarding wizard rather than a ready session -- this source deliberately detects that and gives up cleanly rather than hang or misread wizard text as usage numbers.
+- If `claude` *is* fully set up and this still returns `None`, the `/usage` panel's real wording may not match the regexes in `macropad/usage_pty.py` (`_SESSION_PCT_RE`/`_WEEKLY_PCT_RE`) -- we were not able to verify the exact current text of a real `/usage` panel while building this (only the failure screens). Run `claude` by hand, type `/usage`, and compare what you see against those patterns; adjust them if the wording has changed.
+- Confirm no orphaned `claude` processes are piling up (`ps aux | grep claude`) -- there shouldn't be any, since the process is always killed in a `finally` block, but if you see one, that's worth reporting.
+- If you're not sure whether `pyte` is installed, `uv run python3 -c "import pyte"` -- an `ImportError` means the bridge logged a warning and is using the cruder fallback ANSI stripper. `uv sync --extra pty` to fix.
 
 ## "Address already in use" when starting the bridge
 

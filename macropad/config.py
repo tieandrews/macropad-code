@@ -4,6 +4,7 @@ See docs/customization.md for the file formats.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -40,18 +41,29 @@ def load_usage_settings() -> dict:
     return _load_yaml(USAGE_PATH)
 
 
-def set_usage_enabled(enabled: bool) -> None:
-    """Flips the `enabled:` flag in usage.yaml in place, preserving the
-    file's explanatory comments (a full YAML dump/reload would strip
-    them)."""
-    import re
-
-    text = USAGE_PATH.read_text()
-    value = "true" if enabled else "false"
-    patched, count = re.subn(r"^enabled:\s*\S+", f"enabled: {value}", text, count=1, flags=re.MULTILINE)
+def _patch_top_level_scalar(path: Path, key: str, value: str) -> None:
+    """Sets a top-level `key: value` line in a YAML file in place,
+    preserving comments and everything else (a full YAML dump/reload
+    would strip comments). Only matches unindented `key:` lines, so it's
+    safe even if the same key name appears nested elsewhere in the file."""
+    text = path.read_text()
+    pattern = rf"^{re.escape(key)}:\s*\S+"
+    patched, count = re.subn(pattern, f"{key}: {value}", text, count=1, flags=re.MULTILINE)
     if count == 0:
-        patched = f"enabled: {value}\n" + text
-    USAGE_PATH.write_text(patched)
+        patched = f"{key}: {value}\n" + text
+    path.write_text(patched)
+
+
+def set_usage_enabled(enabled: bool) -> None:
+    _patch_top_level_scalar(USAGE_PATH, "enabled", "true" if enabled else "false")
+
+
+def set_usage_source(source: str) -> None:
+    _patch_top_level_scalar(USAGE_PATH, "source", source)
+
+
+def set_usage_poll_interval(seconds: int) -> None:
+    _patch_top_level_scalar(USAGE_PATH, "poll_interval_seconds", str(seconds))
 
 
 def save_keymap(data: dict) -> None:

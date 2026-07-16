@@ -208,16 +208,50 @@ def configure_keymap(agents: list) -> None:
 
 def configure_usage_display() -> None:
     print("\n== Usage display (OLED) ==")
-    print("The MacroPad's screen can show a rough token-usage dashboard -- your "
-          "current session and trailing-week totals -- read from Claude Code's own "
-          "local session history. These are raw token counts, not an official "
-          "quota percentage (Anthropic doesn't publish that number anywhere a "
-          "script can read it); see docs/customization.md if you want to turn it "
-          "into a percentage bar using your own estimated budget.")
-    enabled = ask_yes_no("Show usage stats on the MacroPad's OLED?", default=True)
-    config.set_usage_enabled(enabled)
-    print(f"  {'enabled' if enabled else 'disabled'} -- see config/usage.yaml to tune "
-          "the poll interval or windows.")
+    print("The MacroPad's screen can show your Claude Code token usage. There are "
+          "three ways to get the numbers -- see docs/customization.md for the full "
+          "tradeoffs:")
+    print("  1. Local estimate -- always works, zero extra setup. Shows raw token "
+          "counts (or a % if you set your own budget). Not Anthropic's real quota.")
+    print("  2. claude-monitor -- real Anthropic percentages, but only if you already "
+          "run the community Claude-Code-Usage-Monitor tool.")
+    print("  3. Live claude /usage (experimental) -- real percentages by periodically "
+          "launching `claude` itself in the background. Heavier, more fragile, and "
+          "needs `claude` already logged in with the working directory already "
+          "trusted -- see docs/customization.md before picking this.")
+
+    if not ask_yes_no("Enable the OLED usage display?", default=True):
+        config.set_usage_enabled(False)
+        print("  disabled.")
+        return
+
+    source_idx = ask_choice("Which usage source?", [
+        "Local estimate (recommended default)",
+        "claude-monitor (only if you already run it)",
+        "Live claude /usage (experimental)",
+    ])
+    source = ["local_estimate", "claude_monitor", "claude_pty"][source_idx]
+
+    config.set_usage_enabled(True)
+    config.set_usage_source(source)
+
+    if source == "claude_pty":
+        print("  claude_pty selected -- before this will work:")
+        print("    1. Run `claude` by hand once from the directory in "
+              "config/usage.yaml's claude_pty.working_dir (your home directory by "
+              "default) and get all the way to a normal chat prompt -- that clears "
+              "both the onboarding wizard and any directory-trust prompt.")
+        print("    2. It should go straight to a chat, not a login/theme screen, on "
+              "every future launch.")
+        print("  Also raising poll_interval_seconds to 600s -- this launches a full "
+              "`claude` process every poll, so keep it infrequent. Edit "
+              "config/usage.yaml to change it.")
+        config.set_usage_poll_interval(600)
+        print("  Note: this needs the optional `pyte` dependency for reliable "
+              "parsing -- run `uv sync --extra pty` (or `pip install pyte`).")
+
+    print(f"  usage display: enabled, source={source} -- see config/usage.yaml to tune "
+          "windows, budgets, or source-specific settings.")
 
 
 # ---------------------------------------------------------------------------

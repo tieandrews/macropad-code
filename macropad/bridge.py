@@ -81,12 +81,28 @@ class Bridge:
         settings = config.load_usage_settings()
         if not settings.get("enabled", False):
             return
+
+        source = settings.get("source", "local_estimate")
+        interval = settings.get("poll_interval_seconds", 60)
+        if source == "claude_pty":
+            if interval < 300:
+                print(f"[macropad-bridge] warning: usage source is claude_pty but "
+                      f"poll_interval_seconds is {interval}s -- this launches a full "
+                      "claude process every poll; consider 300s+. See "
+                      "config/usage.yaml / docs/customization.md.", flush=True)
+            try:
+                import pyte  # noqa: F401
+            except ImportError:
+                print("[macropad-bridge] warning: usage source is claude_pty but the "
+                      "optional 'pyte' package isn't installed (uv sync --extra pty) "
+                      "-- falling back to a cruder ANSI stripper.", flush=True)
+
         self._usage_thread = threading.Thread(
             target=self._usage_loop, args=(settings,), daemon=True
         )
         self._usage_thread.start()
-        print("[macropad-bridge] usage display enabled "
-              f"(every {settings.get('poll_interval_seconds', 60)}s)", flush=True)
+        print(f"[macropad-bridge] usage display enabled (source={source}, "
+              f"every {interval}s)", flush=True)
 
     def serve_forever(self) -> None:
         print(f"[macropad-bridge] listening on {self.host}:{self.port}", flush=True)

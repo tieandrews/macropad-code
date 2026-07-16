@@ -11,6 +11,10 @@ dependencies = [
 
 [project.optional-dependencies]
 autodetect = ["adafruit-board-toolkit>=1.1.0"]
+# For config/usage.yaml's `source: claude_pty` (experimental) -- turns the
+# raw ANSI terminal stream from a driven `claude` process into readable
+# text. See macropad/usage_pty.py.
+pty = ["pyte>=0.8.1"]
 
 [project.scripts]
 macropad-setup = "macropad.setup_cli:main"

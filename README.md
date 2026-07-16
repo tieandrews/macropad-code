@@ -68,7 +68,13 @@ WEEK 7D: 1.9M
 [##..........] 18%
 ```
 
-This reads Claude Code's own local session transcripts (`~/.claude/projects/`) -- the same place its `/usage` command draws from. There's no official, published API for your exact plan quota, so by default the pad shows **raw token counts** rather than a fabricated percentage. If you want a percentage bar instead, set your own estimated `session_token_budget`/`weekly_token_budget` in [`config/usage.yaml`](config/usage.yaml) -- see [docs/customization.md](docs/customization.md) for details. Codex CLI has no local equivalent to read, so this is Claude Code only.
+There's no official Anthropic API for your exact Pro/Max session/weekly quota, so `config/usage.yaml`'s `source:` lets you pick how these numbers get populated:
+
+- **`local_estimate`** (default) -- sums tokens from Claude Code's own local session transcripts. Always works, zero setup, but shows a raw count rather than Anthropic's real percentage unless you set your own estimated budget.
+- **`claude_monitor`** -- real Anthropic percentages, if you already run the community [Claude-Code-Usage-Monitor](https://github.com/Maciek-roboblog/Claude-Code-Usage-Monitor) tool.
+- **`claude_pty`** (experimental) -- real Anthropic percentages by periodically driving `claude` itself through its `/usage` command. Heavier and more fragile -- see [docs/customization.md](docs/customization.md) for the tradeoffs we found while building it (it needs `claude` already fully logged in with the target directory already trusted, or it detects that and cleanly falls back rather than hang).
+
+Whichever you pick, a failure always falls back to `local_estimate` rather than showing nothing. Codex CLI has no local equivalent to any of these, so usage display is Claude Code only.
 
 ## Customizing
 
@@ -94,7 +100,9 @@ firmware/           CircuitPython firmware that runs on the MacroPad itself
 macropad/            host-side Python package
   config.py           loads config/*.yaml
   serial_link.py       finds + maintains the USB serial connection
-  usage.py              reads local Claude Code usage from ~/.claude/projects/
+  usage.py              local-estimate usage + the source dispatcher
+  usage_monitor.py       optional Claude-Code-Usage-Monitor integration
+  usage_pty.py            experimental live `claude /usage` scraper
   bridge.py            the background daemon (macropad-bridge)
   client.py            tiny client hooks use to talk to the daemon
   setup_cli.py          the interactive `macropad-setup` command

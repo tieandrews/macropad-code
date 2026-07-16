@@ -122,27 +122,92 @@ def _pct(tokens: int, budget: Optional[int]) -> Optional[int]:
     return max(0, min(100, round(tokens / budget * 100)))
 
 
-def build_display_payload(settings: dict) -> dict:
-    """Builds the {"usage": {...}} message the bridge sends over serial
-    for the MacroPad's OLED, from config/usage.yaml settings."""
+def _labels(settings: dict) -> tuple:
+    session_hours = settings.get("session_window_hours", 5)
+    weekly_days = settings.get("weekly_window_days", 7)
+    return f"SESSION {session_hours:g}H", f"WEEK {weekly_days:g}D"
+
+
+def _payload_from_local_estimate(settings: dict) -> dict:
     session_hours = settings.get("session_window_hours", 5)
     weekly_days = settings.get("weekly_window_days", 7)
     computed = compute_usage(session_window_hours=session_hours, weekly_window_days=weekly_days)
-
     session_tokens = computed["session_tokens"]
     weekly_tokens = computed["weekly_tokens"]
+    session_label, weekly_label = _labels(settings)
 
     return {
         "usage": {
             "session": {
-                "label": f"SESSION {session_hours:g}H",
+                "label": session_label,
                 "value": format_count(session_tokens),
                 "pct": _pct(session_tokens, settings.get("session_token_budget")),
             },
             "weekly": {
-                "label": f"WEEK {weekly_days:g}D",
+                "label": weekly_label,
                 "value": format_count(weekly_tokens),
                 "pct": _pct(weekly_tokens, settings.get("weekly_token_budget")),
             },
         }
     }
+
+
+def _payload_from_percentages(settings: dict, pct_result: dict) -> dict:
+    session_label, weekly_label = _labels(settings)
+    session_pct = pct_result.get("session_pct")
+    weekly_pct = pct_result.get("weekly_pct")
+
+    return {
+        "usage": {
+            "session": {
+                "label": session_label,
+                "value": f"{session_pct}%" if session_pct is not None else "?",
+                "pct": session_pct,
+            },
+            "weekly": {
+                "label": weekly_label,
+                "value": f"{weekly_pct}%" if weekly_pct is not None else "?",
+                "pct": weekly_pct,
+            },
+        }
+    }
+
+
+def build_display_payload(settings: dict) -> dict:
+    """Builds the {"usage": {...}} message the bridge sends over serial
+    for the MacroPad's OLED, from config/usage.yaml settings.
+
+    `source` picks where the numbers come from:
+      - "local_estimate" (default): always available, see compute_usage().
+      - "claude_monitor": real Anthropic percentages via the community
+        Claude-Code-Usage-Monitor tool, if it's running (usage_monitor.py).
+      - "claude_pty": real Anthropic percentages by driving `claude`
+        itself (usage_pty.py) -- experimental, see that module's
+        docstring for the tradeoffs.
+
+    Both non-default sources fall back to the local estimate if they
+    return nothing (tool not running, claude not ready, parsing failed,
+    ...) -- this function always returns a usable payload."""
+    source = settings.get("source", "local_estimate")
+
+    if source == "claude_monitor":
+        from . import usage_monitor
+
+        monitor_settings = settings.get("claude_monitor") or {}
+        result = usage_monitor.read_monitor_percentages(monitor_settings.get("state_path"))
+        if result is not None:
+            return _payload_from_percentages(settings, result)
+
+    elif source == "claude_pty":
+        from . import usage_pty
+
+        pty_settings = settings.get("claude_pty") or {}
+        result = usage_pty.get_usage_percentages(
+            claude_command=pty_settings.get("claude_command", "claude"),
+            working_dir=pty_settings.get("working_dir"),
+            timeout_seconds=pty_settings.get("timeout_seconds", 20.0),
+        )
+        if result is not None:
+            return _payload_from_percentages(settings, result)
+
+    return _payload_from_local_estimate(settings)

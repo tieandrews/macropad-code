@@ -81,11 +81,20 @@ The bridge's serial connection self-heals: if the MacroPad is unplugged, put to 
 
 ## Usage display polling
 
-If `config/usage.yaml` has `enabled: true`, the bridge also starts a second background thread that recomputes your Claude Code token usage every `poll_interval_seconds` and pushes it to the OLED -- independent of the LED/hook traffic. You'll see it announce itself on startup:
+If `config/usage.yaml` has `enabled: true`, the bridge also starts a second background thread that recomputes your Claude Code usage every `poll_interval_seconds` and pushes it to the OLED -- independent of the LED/hook traffic. You'll see it announce itself on startup, including which `source` it's using:
 
 ```
-[macropad-bridge] usage display enabled (every 60s)
+[macropad-bridge] usage display enabled (source=local_estimate, every 60s)
 [macropad-bridge] usage session=128.4K weekly=1.9M -> sent
 ```
 
 If that first line never appears, usage display is disabled in `config/usage.yaml` -- see [customization.md](customization.md).
+
+If `source: claude_pty` is set with too short a `poll_interval_seconds`, or without the optional `pyte` dependency installed, the bridge logs a warning at startup rather than silently doing the expensive/degraded thing:
+
+```
+[macropad-bridge] warning: usage source is claude_pty but poll_interval_seconds is 60s -- this launches a full claude process every poll; consider 300s+. See config/usage.yaml / docs/customization.md.
+[macropad-bridge] warning: usage source is claude_pty but the optional 'pyte' package isn't installed (uv sync --extra pty) -- falling back to a cruder ANSI stripper.
+```
+
+Whatever `source` is configured, a per-tick failure (monitor tool not running, `claude` not ready, parsing came up empty) silently falls back to `local_estimate` for that tick -- you can tell which actually supplied the numbers by the value's shape: a clean `NN%` means a real percentage came through, `128.4K`/`1.9M`-style counts mean it fell back.
