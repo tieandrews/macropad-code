@@ -1,0 +1,14 @@
+[Unit]
+Description=macropad-code bridge (agent status LEDs)
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=__PYTHON__ -m macropad.bridge
+WorkingDirectory=__REPO_ROOT__
+Environment=PYTHONPATH=__REPO_ROOT__
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

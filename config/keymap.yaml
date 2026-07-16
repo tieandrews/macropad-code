@@ -1,0 +1,37 @@
+# =============================================================================
+# keymap.yaml -- MacroPad key -> project/agent assignment
+# =============================================================================
+# The Adafruit MacroPad RP2040 has 12 keys, numbered left-to-right,
+# top-to-bottom:
+#
+#     0   1   2
+#     3   4   5
+#     6   7   8
+#     9  10  11
+#
+# Assign each key you want to use as a status light to a project directory
+# and an agent. When a Claude Code or Codex CLI hook fires from that
+# directory (or a subdirectory of it), the bridge looks up the *longest
+# matching* project_path here and lights that key.
+#
+# `macropad-setup` will offer to fill this in interactively, but you can
+# always hand-edit it -- see docs/customization.md.
+# =============================================================================
+
+keys:
+  0:
+    label: "Example project"
+    agent: claude          # claude | codex
+    project_path: "~/projects/example"
+
+# Add more keys as needed, e.g.:
+# 1:
+#   label: "api-server"
+#   agent: codex
+#   project_path: "~/projects/api-server"
+
+# The rotary encoder isn't wired to anything by default. Reserved for
+# future use (e.g. cycling reasoning effort, muting the pad).
+encoder:
+  press_action: none
+  rotate_action: none

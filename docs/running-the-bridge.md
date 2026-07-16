@@ -1,0 +1,71 @@
+# Running macropad-bridge
+
+`macropad-bridge` is the daemon that owns the MacroPad's USB serial connection and relays state changes from hook scripts to actual LED colors. It needs to be running whenever you want the lights to work; nothing bad happens if it isn't (hooks just silently no-op), but nothing lights up either.
+
+## Manually
+
+```bash
+pip install -e .          # once, from the repo root -- installs the macropad-bridge command
+macropad-bridge
+```
+
+or, without installing the package:
+
+```bash
+pip install -r requirements.txt
+./bin/macropad-bridge
+```
+
+Leave it running in a terminal (or `tmux`/`screen` session). It logs every state change it relays, e.g.:
+
+```
+[macropad-bridge] listening on 127.0.0.1:9999
+[macropad-bridge] connected to /dev/ttyACM1
+[macropad-bridge] key=0 state=working color=[76, 42, 0] -> sent
+```
+
+## As a background service
+
+`macropad-setup` offers to install this for you at the end of setup. If you skipped that or want to redo it, run `macropad-setup` again -- it's safe to re-run.
+
+What it does per platform:
+
+### macOS (launchd)
+
+Writes `~/Library/LaunchAgents/com.macropad-code.bridge.plist` (from [`macropad/services/launchd.plist.template`](../macropad/services/launchd.plist.template)) and, if you confirm, loads it with `launchctl load -w`. Logs go to `logs/macropad-bridge.{out,err}.log` in the repo.
+
+Manage it manually with:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.macropad-code.bridge.plist   # stop
+launchctl load -w ~/Library/LaunchAgents/com.macropad-code.bridge.plist  # start
+launchctl list | grep macropad-code                                     # status
+```
+
+### Linux (systemd --user)
+
+Writes `~/.config/systemd/user/macropad-bridge.service` (from [`macropad/services/systemd.service.template`](../macropad/services/systemd.service.template)) and, if you confirm, runs `systemctl --user enable --now macropad-bridge.service`.
+
+Manage it manually with:
+
+```bash
+systemctl --user status macropad-bridge     # status
+systemctl --user restart macropad-bridge    # restart (e.g. after editing colors.yaml)
+systemctl --user stop macropad-bridge       # stop
+journalctl --user -u macropad-bridge -f     # logs
+```
+
+If your distro doesn't start user services at boot by default, enable lingering once with `loginctl enable-linger $USER` so the bridge starts without you being logged in interactively.
+
+### Windows
+
+Windows startup isn't fully automated. `macropad-setup` writes a no-console launcher to `%APPDATA%\macropad-code\macropad_bridge_launcher.pyw` (from [`macropad/services/windows_launcher.pyw.template`](../macropad/services/windows_launcher.pyw.template)). To make it run at login:
+
+1. Press `Win+R`, type `shell:startup`, hit Enter.
+2. Create a shortcut to `macropad_bridge_launcher.pyw` in the folder that opens.
+
+Double-clicking the `.pyw` file directly also works for a one-off run (it uses `pythonw.exe`, so no console window appears).
+
+## Reconnect behavior
+
+The bridge's serial connection self-heals: if the MacroPad is unplugged, put to sleep, or resets, a background thread keeps retrying every `serial.retry_seconds` (default 2s, see [customization.md](customization.md)) until it's found again. You don't need to restart the bridge after replugging the device.

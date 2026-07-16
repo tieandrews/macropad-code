@@ -1,0 +1,27 @@
+[project]
+name = "macropad-code"
+version = "0.1.0"
+description = "Drive an Adafruit MacroPad RP2040's per-key LEDs from Claude Code / Codex CLI agent status"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pyserial>=3.5",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+autodetect = ["adafruit-board-toolkit>=1.1.0"]
+
+[project.scripts]
+macropad-setup = "macropad.setup_cli:main"
+macropad-bridge = "macropad.bridge:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["macropad*"]
+
+[tool.setuptools.package-data]
+macropad = ["services/*.template"]

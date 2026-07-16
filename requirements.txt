@@ -1,0 +1,5 @@
+pyserial>=3.5
+pyyaml>=6.0
+
+# Optional but recommended: more reliable MacroPad serial port auto-detection.
+# adafruit-board-toolkit>=1.1.0

@@ -1,0 +1,20 @@
+# =============================================================================
+# bridge.yaml -- settings for the macropad-bridge daemon
+# =============================================================================
+# The bridge is the long-running background process that owns the MacroPad's
+# USB serial connection. Hook scripts never talk to the serial port
+# directly -- they send a tiny message to this local socket instead, which
+# lets multiple agents/hooks share one connection safely.
+# =============================================================================
+
+# Loopback host/port the bridge listens on for hook messages.
+# No reason to change this unless the port is already in use.
+host: "127.0.0.1"
+port: 9999
+
+# Serial connection to the MacroPad itself.
+serial:
+  baudrate: 115200
+  # Seconds between reconnect attempts when the MacroPad is unplugged,
+  # asleep, or not yet found.
+  retry_seconds: 2.0

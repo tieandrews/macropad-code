@@ -1,0 +1,86 @@
+# macropad-code
+
+Turn an [Adafruit MacroPad RP2040](https://www.adafruit.com/product/5128) into a live per-key status light for Claude Code and/or Codex CLI sessions -- a DIY, ~CA$75 alternative to OpenAI's Codex Micro's "Agent Keys."
+
+Each key you assign to a project lights up with the state of the agent running there:
+
+| State | Default color | Meaning |
+|---|---|---|
+| `working` | amber | agent is actively thinking / running |
+| `waiting` | magenta | agent finished its turn, waiting on you |
+| `permission` | red | agent needs your approval to continue |
+| `done` | green | agent completed successfully |
+| `error` | dark red | agent or a hook hit an error |
+| `idle` | dim green | no active session |
+
+## How it works
+
+```
+Claude Code / Codex CLI hook fires
+  -> a tiny hook script maps the event to a state
+  -> macropad-bridge (background daemon) resolves the state to a color
+     and pushes it to the MacroPad over USB serial
+  -> the MacroPad's firmware lights the matching key
+```
+
+See [docs/agent-integration.md](docs/agent-integration.md) for the full wiring diagram.
+
+## Quickstart
+
+1. **Flash the MacroPad.** Follow [docs/hardware-setup.md](docs/hardware-setup.md) to install CircuitPython and copy `firmware/boot.py` + `firmware/code.py` onto it.
+
+2. **Install this repo's Python side:**
+
+   ```bash
+   git clone <this repo>
+   cd macropad-code
+   python3 -m venv .venv && source .venv/bin/activate   # optional but recommended
+   pip install -e .
+   ```
+
+3. **Run the interactive setup:**
+
+   ```bash
+   macropad-setup
+   ```
+
+   It will ask which agent(s) you use (Claude Code, Codex CLI, or both), wire the matching hooks into `~/.claude/settings.json` and/or `~/.codex/config.toml`, let you assign MacroPad keys to project directories, and optionally install `macropad-bridge` as a background service so it starts automatically at login.
+
+4. **Start using it.** Run Claude Code or Codex CLI from a project directory you assigned to a key, and that key's LED should track the session's state. If you didn't install the background service, start it manually first: `macropad-bridge`.
+
+## Customizing
+
+- **Which key maps to which project:** [`config/keymap.yaml`](config/keymap.yaml)
+- **What each state looks like:** [`config/colors.yaml`](config/colors.yaml)
+- **Bridge daemon settings (port, reconnect interval):** [`config/bridge.yaml`](config/bridge.yaml)
+
+All three are plain YAML -- see [docs/customization.md](docs/customization.md) for the full reference. No code changes needed for everyday tweaks.
+
+## Docs
+
+- [docs/hardware-setup.md](docs/hardware-setup.md) -- flashing the MacroPad
+- [docs/agent-integration.md](docs/agent-integration.md) -- how hook events become LED colors
+- [docs/customization.md](docs/customization.md) -- keymap / colors / bridge settings
+- [docs/running-the-bridge.md](docs/running-the-bridge.md) -- running `macropad-bridge` manually or as a service
+- [docs/troubleshooting.md](docs/troubleshooting.md) -- common problems
+
+## Repo layout
+
+```
+firmware/           CircuitPython firmware that runs on the MacroPad itself
+macropad/            host-side Python package
+  config.py           loads config/*.yaml
+  serial_link.py       finds + maintains the USB serial connection
+  bridge.py            the background daemon (macropad-bridge)
+  client.py            tiny client hooks use to talk to the daemon
+  setup_cli.py          the interactive `macropad-setup` command
+  hooks/               Claude Code / Codex CLI hook entry points
+  services/             launchd / systemd / Windows startup templates
+config/              human-edited YAML: keymap.yaml, colors.yaml, bridge.yaml
+docs/                see above
+bin/                 convenience entry points that work without `pip install -e .`
+```
+
+## Status
+
+This is a hobby project, not affiliated with OpenAI, Anthropic, or Adafruit.
