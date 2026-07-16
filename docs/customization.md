@@ -1,6 +1,6 @@
-# Customizing keymap, colors, and the bridge
+# Customizing keymap, colors, usage display, and the bridge
 
-All three config files live in [`config/`](../config/) and are plain YAML -- edit them in any text editor. `macropad-bridge` reads `config/colors.yaml` and `config/bridge.yaml` at startup (restart it after editing those), and `config/keymap.yaml` on every hook event (no restart needed).
+All config files live in [`config/`](../config/) and are plain YAML -- edit them in any text editor. `macropad-bridge` reads `config/colors.yaml`, `config/bridge.yaml`, and `config/usage.yaml` at startup (restart it after editing those), and `config/keymap.yaml` on every hook event (no restart needed).
 
 ## `config/keymap.yaml` -- which key belongs to which project
 
@@ -68,6 +68,35 @@ serial:
 - `host`/`port`: the local socket hook scripts use to talk to the bridge. Only change this if `9999` is already taken by something else on your machine -- and if you do, restart the bridge.
 - `serial.retry_seconds`: how often the bridge tries to (re)find the MacroPad if it's unplugged, asleep, or not yet connected. Lower it if you want faster reconnects at the cost of slightly more CPU/USB polling.
 
+## `config/usage.yaml` -- OLED usage dashboard
+
+```yaml
+enabled: true
+poll_interval_seconds: 60
+session_window_hours: 5
+weekly_window_days: 7
+session_token_budget: null
+weekly_token_budget: null
+```
+
+The bridge periodically scans Claude Code's own local session transcripts under `~/.claude/projects/**/*.jsonl` and sums the token usage recorded in them over two rolling windows: the last `session_window_hours` and the last `weekly_window_days`. The result gets pushed straight to the MacroPad's OLED (independent of any key -- it's a single shared dashboard, not per-project).
+
+**Why raw token counts, not a percentage?** Anthropic doesn't publish the exact token budget behind the "session" and "weekly" limits shown in Claude Code's own `/usage` command, and there's no documented API a local script can query for it -- so we don't fabricate a number we can't back up. By default `session_token_budget`/`weekly_token_budget` are `null` and the OLED just shows a raw count (`128.4K`, `1.9M`, ...). If you've empirically learned roughly where your own plan's limits kick in, set either budget to your own estimated token ceiling and that metric switches to a percentage bar instead:
+
+```yaml
+session_token_budget: 500000
+weekly_token_budget: 2000000
+```
+
+Other notes:
+
+- **Claude Code only.** Codex CLI doesn't write anything locally that this can read.
+- `poll_interval_seconds` trades freshness for disk I/O -- the scan reads every transcript file modified within the weekly window on every tick. 60s is a reasonable default; raise it if you have a very large `~/.claude/projects/` history.
+- The transcript JSONL format is internal to Claude Code and can change between releases. `macropad/usage.py` parses it defensively (any line, file, or field it doesn't recognize is skipped, not raised) so a format change degrades to "shows 0" rather than crashing the bridge -- but the numbers could in principle go stale if Anthropic changes the schema. If that happens, check the field names `macropad/usage.py` looks for (`message.usage.{input,output,cache_creation_input,cache_read_input}_tokens` and a top-level `timestamp`) against a real file in `~/.claude/projects/` to see what changed.
+- Toggle it on/off any time with `uv run macropad-setup` (it only touches the `enabled:` line, your comments and other settings stay put), or hand-edit `enabled: true`/`false` directly.
+
 ## Firmware-side changes
 
-Per-key LED behavior (brightness clamp, how JSON messages are parsed) lives in [`firmware/code.py`](../firmware/code.py) on the MacroPad itself, not in this repo's Python. If you change it, re-copy the file to `CIRCUITPY/code.py` -- no reboot needed, CircuitPython reloads automatically on save.
+Per-key LED behavior and the OLED dashboard layout (bar width, line spacing, brightness clamp, how JSON messages are parsed) live in [`firmware/code.py`](../firmware/code.py) on the MacroPad itself, not in this repo's Python. If you change it, re-copy the file to `CIRCUITPY/code.py` -- no reboot needed, CircuitPython reloads automatically on save.
+
+To change how the usage bars *look* (e.g. wider bars, different labels) without touching the token-counting logic, edit the constants and `_render_bar`/`_apply_usage_message` near the top of `code.py`. `BAR_WIDTH` is deliberately conservative (12 chars) to stay within the OLED's 128px width at the built-in font's ~6px glyph width -- widen it carefully if you switch fonts.

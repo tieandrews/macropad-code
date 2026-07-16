@@ -5,11 +5,18 @@
 ## Manually
 
 ```bash
+uv sync            # once, from the repo root
+uv run macropad-bridge
+```
+
+Without `uv`:
+
+```bash
 pip install -e .          # once, from the repo root -- installs the macropad-bridge command
 macropad-bridge
 ```
 
-or, without installing the package:
+or, without installing the package at all:
 
 ```bash
 pip install -r requirements.txt
@@ -26,7 +33,9 @@ Leave it running in a terminal (or `tmux`/`screen` session). It logs every state
 
 ## As a background service
 
-`macropad-setup` offers to install this for you at the end of setup. If you skipped that or want to redo it, run `macropad-setup` again -- it's safe to re-run.
+`macropad-setup` offers to install this for you at the end of setup. If you skipped that or want to redo it, run `uv run macropad-setup` again -- it's safe to re-run.
+
+The generated service files hardcode the Python interpreter that was running `macropad-setup` at the time -- when installed via `uv run macropad-setup`, that's `.venv/bin/python3` inside the repo, already wired up with every dependency `uv sync` installed, so the service doesn't need `uv run` itself at runtime.
 
 What it does per platform:
 
@@ -50,7 +59,7 @@ Manage it manually with:
 
 ```bash
 systemctl --user status macropad-bridge     # status
-systemctl --user restart macropad-bridge    # restart (e.g. after editing colors.yaml)
+systemctl --user restart macropad-bridge    # restart (e.g. after editing colors.yaml/usage.yaml)
 systemctl --user stop macropad-bridge       # stop
 journalctl --user -u macropad-bridge -f     # logs
 ```
@@ -69,3 +78,14 @@ Double-clicking the `.pyw` file directly also works for a one-off run (it uses `
 ## Reconnect behavior
 
 The bridge's serial connection self-heals: if the MacroPad is unplugged, put to sleep, or resets, a background thread keeps retrying every `serial.retry_seconds` (default 2s, see [customization.md](customization.md)) until it's found again. You don't need to restart the bridge after replugging the device.
+
+## Usage display polling
+
+If `config/usage.yaml` has `enabled: true`, the bridge also starts a second background thread that recomputes your Claude Code token usage every `poll_interval_seconds` and pushes it to the OLED -- independent of the LED/hook traffic. You'll see it announce itself on startup:
+
+```
+[macropad-bridge] usage display enabled (every 60s)
+[macropad-bridge] usage session=128.4K weekly=1.9M -> sent
+```
+
+If that first line never appears, usage display is disabled in `config/usage.yaml` -- see [customization.md](customization.md).

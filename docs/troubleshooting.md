@@ -10,7 +10,7 @@
 - If you have `adafruit-board-toolkit` installed, port detection is used automatically; without it, the bridge falls back to scanning for Adafruit's USB vendor ID (`0x239A`) or a product string containing "macropad". If your OS reports something unusual, run this to see what's plugged in:
 
   ```bash
-  python3 -c "from serial.tools import list_ports; [print(p.device, p.vid, p.product) for p in list_ports.comports()]"
+  uv run python3 -c "from serial.tools import list_ports; [print(p.device, p.vid, p.product) for p in list_ports.comports()]"
   ```
 
 ## Hooks fire but no LED changes
@@ -19,14 +19,14 @@
 2. Is the key assigned? Hooks silently no-op if the session's working directory doesn't match any `project_path` in `config/keymap.yaml`. Check with:
 
    ```bash
-   python3 -c "from macropad import config; print(config.key_for_path('/path/you/were/in'))"
+   uv run python3 -c "from macropad import config; print(config.key_for_path('/path/you/were/in'))"
    ```
 
    `None` means no match -- see [customization.md](customization.md).
 3. Test the hook script directly:
 
    ```bash
-   echo '{"hook_event_name":"Stop","cwd":"/path/from/your/keymap"}' | python3 macropad/hooks/claude_hook.py
+   echo '{"hook_event_name":"Stop","cwd":"/path/from/your/keymap"}' | uv run python3 macropad/hooks/claude_hook.py
    ```
 
    Then check the bridge's log for a `key=... state=done` line.
@@ -44,8 +44,20 @@ This is partly expected -- see the "Known limitation" note in [agent-integration
 - Test the hook directly:
 
   ```bash
-  python3 macropad/hooks/codex_hook.py '{"type":"agent-turn-complete","cwd":"/path/from/your/keymap"}'
+  uv run python3 macropad/hooks/codex_hook.py '{"type":"agent-turn-complete","cwd":"/path/from/your/keymap"}'
   ```
+
+## The OLED usage dashboard is blank or stuck at "0"
+
+1. Check `enabled: true` in `config/usage.yaml` -- and that the bridge log printed `usage display enabled (every Ns)` on startup. If that line is missing, the bridge read `enabled: false` (or the file failed to parse).
+2. Confirm Claude Code has actually written transcripts to scan:
+
+   ```bash
+   uv run python3 -c "from macropad import usage; print(usage.compute_usage())"
+   ```
+
+   If this prints `{'session_tokens': 0, 'weekly_tokens': 0}` but you know you've used Claude Code recently, check that `~/.claude/projects/` exists and has recently-modified `.jsonl` files under it -- a nonstandard `CLAUDE_CONFIG_DIR` or a Claude Code install that stores state elsewhere would make this always read 0. See [customization.md](customization.md) for the exact fields being parsed.
+3. Remember this is deliberately a *rough* number, not a live "% of quota" unless you've set `session_token_budget`/`weekly_token_budget` yourself -- see [customization.md](customization.md) if the numbers look plausible but the bars never move the way you expect.
 
 ## "Address already in use" when starting the bridge
 

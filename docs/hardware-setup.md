@@ -33,13 +33,13 @@ firmware/code.py -> CIRCUITPY/code.py
 
 ## 4. Verify
 
-With both files in place, the OLED should show the default MacroPad splash and the keys should go dark (all LEDs off) until the bridge starts sending colors. Run `macropad-bridge` (see [running-the-bridge.md](running-the-bridge.md)) and confirm the console prints a line like:
+With both files in place, the OLED should show a blank "AGENT USAGE" screen and the keys should go dark (all LEDs off) until the bridge starts sending data. Run `uv run macropad-bridge` (see [running-the-bridge.md](running-the-bridge.md)) and confirm the console prints a line like:
 
 ```
 [macropad-bridge] connected to /dev/ttyACM1
 ```
 
-(or `/dev/cu.usbmodem*` on macOS, `COMx` on Windows). If it never connects, see [troubleshooting.md](troubleshooting.md).
+(or `/dev/cu.usbmodem*` on macOS, `COMx` on Windows). If it never connects, see [troubleshooting.md](troubleshooting.md). If usage display is enabled (see [customization.md](customization.md)), the OLED should fill in with token counts and bar graphs within `poll_interval_seconds`.
 
 ## Optional: real macros
 

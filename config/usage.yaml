@@ -1,0 +1,36 @@
+# =============================================================================
+# usage.yaml -- local Claude Code usage display on the MacroPad's OLED
+# =============================================================================
+# Reads Claude Code's own local session transcripts (~/.claude/projects/)
+# to show a rough token-usage figure for your current session and trailing
+# week, right on the MacroPad's screen. See docs/customization.md for
+# exactly what this is (and isn't) -- short version: Anthropic doesn't
+# publish your exact plan quota anywhere a script can read it, so by
+# default this shows raw token counts (e.g. "128.4K"), not an official
+# "% of your plan" number. If you want a percentage bar instead, fill in
+# your own estimated budgets below.
+#
+# Claude Code only -- Codex CLI has no local equivalent to read.
+# =============================================================================
+
+enabled: true
+
+# How often (seconds) the bridge recomputes usage and refreshes the OLED.
+# Lower = more up-to-date, higher = less disk I/O. 60s is plenty for a
+# number that only meaningfully changes every few minutes of agent use.
+poll_interval_seconds: 60
+
+# Rolling windows to sum tokens over. 5h mirrors Claude's session-limit
+# window; 7d mirrors the weekly window -- change these if you just want a
+# different reporting period.
+session_window_hours: 5
+weekly_window_days: 7
+
+# Optional: your own estimated token budgets, if you'd rather see a
+# percentage bar than a raw count. Leave both as `null` to just show raw
+# counts. These are NOT official Anthropic numbers -- nobody outside
+# Anthropic publishes the real ones -- just whatever you've personally
+# calibrated from experience (e.g. "I usually get throttled around 2M
+# tokens/week on my plan").
+session_token_budget: null
+weekly_token_budget: null

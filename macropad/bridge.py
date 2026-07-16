@@ -7,6 +7,11 @@ That keeps exactly one thing responsible for the (fragile, single-owner)
 USB connection, and means hooks never block an agent session waiting on
 hardware.
 
+This process also owns the optional usage-display poller: a background
+thread that periodically reads local Claude Code usage (see usage.py) and
+pushes it straight to the MacroPad's OLED over the same serial link --
+independent of the per-key LED status traffic coming from hooks.
+
 Run with: macropad-bridge   (installed via pyproject.toml console_scripts)
 or:       python -m macropad.bridge
 """
@@ -14,8 +19,9 @@ from __future__ import annotations
 
 import json
 import socketserver
+import threading
 
-from . import config
+from . import config, usage
 from .serial_link import ReconnectingSerial
 
 DEFAULT_HOST = "127.0.0.1"
@@ -43,6 +49,8 @@ class Bridge:
         self._server = socketserver.ThreadingTCPServer((host, port), _Handler)
         self._server.daemon_threads = True
         self._server.on_message = self._on_message  # type: ignore[attr-defined]
+        self._usage_stop = threading.Event()
+        self._usage_thread: threading.Thread | None = None
 
     def _on_message(self, msg: dict) -> None:
         key = msg.get("key")
@@ -55,13 +63,40 @@ class Bridge:
         status = "sent" if ok else "dropped (MacroPad not connected)"
         print(f"[macropad-bridge] key={key} state={state} color={color} -> {status}", flush=True)
 
+    def _usage_loop(self, settings: dict) -> None:
+        interval = settings.get("poll_interval_seconds", 60)
+        while not self._usage_stop.is_set():
+            try:
+                payload = usage.build_display_payload(settings)
+                ok = self.link.write_line(json.dumps(payload))
+                if ok:
+                    s = payload["usage"]["session"]["value"]
+                    w = payload["usage"]["weekly"]["value"]
+                    print(f"[macropad-bridge] usage session={s} weekly={w} -> sent", flush=True)
+            except Exception as exc:  # best-effort: never let usage polling kill the bridge
+                print(f"[macropad-bridge] usage poll failed: {exc}", flush=True)
+            self._usage_stop.wait(interval)
+
+    def start_usage_poller(self) -> None:
+        settings = config.load_usage_settings()
+        if not settings.get("enabled", False):
+            return
+        self._usage_thread = threading.Thread(
+            target=self._usage_loop, args=(settings,), daemon=True
+        )
+        self._usage_thread.start()
+        print("[macropad-bridge] usage display enabled "
+              f"(every {settings.get('poll_interval_seconds', 60)}s)", flush=True)
+
     def serve_forever(self) -> None:
         print(f"[macropad-bridge] listening on {self.host}:{self.port}", flush=True)
+        self.start_usage_poller()
         try:
             self._server.serve_forever()
         except KeyboardInterrupt:
             pass
         finally:
+            self._usage_stop.set()
             self._server.server_close()
             self.link.close()
 

@@ -1,3 +1,5 @@
+# pip fallback for people not using uv. Primary path is `uv sync`, which
+# reads pyproject.toml + uv.lock instead -- see README.md.
 pyserial>=3.5
 pyyaml>=6.0
 

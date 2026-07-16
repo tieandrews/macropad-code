@@ -203,6 +203,24 @@ def configure_keymap(agents: list) -> None:
 
 
 # ---------------------------------------------------------------------------
+# usage display
+# ---------------------------------------------------------------------------
+
+def configure_usage_display() -> None:
+    print("\n== Usage display (OLED) ==")
+    print("The MacroPad's screen can show a rough token-usage dashboard -- your "
+          "current session and trailing-week totals -- read from Claude Code's own "
+          "local session history. These are raw token counts, not an official "
+          "quota percentage (Anthropic doesn't publish that number anywhere a "
+          "script can read it); see docs/customization.md if you want to turn it "
+          "into a percentage bar using your own estimated budget.")
+    enabled = ask_yes_no("Show usage stats on the MacroPad's OLED?", default=True)
+    config.set_usage_enabled(enabled)
+    print(f"  {'enabled' if enabled else 'disabled'} -- see config/usage.yaml to tune "
+          "the poll interval or windows.")
+
+
+# ---------------------------------------------------------------------------
 # background service
 # ---------------------------------------------------------------------------
 
@@ -283,13 +301,15 @@ def main() -> None:
         configured_agents.append("codex")
 
     configure_keymap(configured_agents)
+    if "claude" in configured_agents:
+        configure_usage_display()
     install_service()
 
     print("\n== Done ==")
     print("Next steps:")
     print("  1. Flash the MacroPad -- see docs/hardware-setup.md")
     print("  2. If you skipped the background service, run `macropad-bridge` in a terminal")
-    print("  3. Edit config/keymap.yaml or config/colors.yaml any time -- "
+    print("  3. Edit config/keymap.yaml, config/colors.yaml, or config/usage.yaml any time -- "
           "see docs/customization.md")
 
 

@@ -14,6 +14,7 @@ CONFIG_DIR = REPO_ROOT / "config"
 KEYMAP_PATH = CONFIG_DIR / "keymap.yaml"
 COLORS_PATH = CONFIG_DIR / "colors.yaml"
 BRIDGE_PATH = CONFIG_DIR / "bridge.yaml"
+USAGE_PATH = CONFIG_DIR / "usage.yaml"
 
 
 def _load_yaml(path: Path) -> dict:
@@ -33,6 +34,24 @@ def load_colors() -> dict:
 
 def load_bridge_settings() -> dict:
     return _load_yaml(BRIDGE_PATH)
+
+
+def load_usage_settings() -> dict:
+    return _load_yaml(USAGE_PATH)
+
+
+def set_usage_enabled(enabled: bool) -> None:
+    """Flips the `enabled:` flag in usage.yaml in place, preserving the
+    file's explanatory comments (a full YAML dump/reload would strip
+    them)."""
+    import re
+
+    text = USAGE_PATH.read_text()
+    value = "true" if enabled else "false"
+    patched, count = re.subn(r"^enabled:\s*\S+", f"enabled: {value}", text, count=1, flags=re.MULTILINE)
+    if count == 0:
+        patched = f"enabled: {value}\n" + text
+    USAGE_PATH.write_text(patched)
 
 
 def save_keymap(data: dict) -> None:

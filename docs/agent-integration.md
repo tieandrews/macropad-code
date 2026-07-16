@@ -41,6 +41,10 @@ Codex CLI invokes this after each completed turn with a JSON payload as a single
 
 **Known limitation:** Codex's `notify` doesn't currently expose fine-grained "thinking" / "waiting on approval" events the way Claude Code's hooks do, so a Codex-assigned key will only ever show `done` (and whatever it defaults to otherwise, `idle`) -- it won't show `working` or `permission`. If Codex CLI adds richer notify events in the future, extend `EVENT_STATES` in `macropad/hooks/codex_hook.py` to take advantage of them.
 
+## The OLED usage dashboard is a separate pipeline
+
+Everything above is about the 12 per-key LEDs, driven by hook events. The OLED's usage dashboard is unrelated: it isn't triggered by hooks at all. Instead the bridge polls `macropad/usage.py` on a timer (`config/usage.yaml`'s `poll_interval_seconds`) and pushes a `{"usage": {...}}` message straight to the MacroPad over the same serial link. See [customization.md](customization.md) for the config and [running-the-bridge.md](running-the-bridge.md) for what the bridge logs while it's running.
+
 ## Adding a new state or event
 
 1. Add the state and its color to `config/colors.yaml` (see [customization.md](customization.md)).
