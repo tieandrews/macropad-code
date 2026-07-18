@@ -24,6 +24,7 @@ keys:
     agent: claude               # claude | codex -- also controls what
                                  # macropad-sessions launches (see below)
     project_path: "~/projects/macropad-code"
+    permission_mode: auto       # optional -- see below
   1:
     label: "api-server"
     agent: codex
@@ -32,11 +33,19 @@ keys:
 
 When a hook fires, it reads the working directory (`cwd`) of the agent session and looks for the entry whose `project_path` is the closest ancestor of that directory -- so a session running in `~/projects/macropad-code/frontend` still matches the `~/projects/macropad-code` entry. If no entry matches, nothing lights up (the hook is a no-op).
 
-You can hand-edit this file directly, or run `macropad-setup` again to add more keys interactively (it won't remove or touch keys you've already configured unless you overwrite them with the same index).
+You can hand-edit this file directly, run `macropad-setup` again to add more keys interactively (it won't remove or touch keys you've already configured unless you overwrite them with the same index), or use the [web UI](#web-ui-macropad-webui) -- click a session key (0-5) in its pad-layout view to edit the same fields (label, project path, agent, permission mode) visually.
 
 `project_path` accepts `~` and both absolute and relative-to-home paths. It does **not** need to exist yet at assignment time -- `macropad-setup` will warn but still save it.
 
 Only keys 0-5 are valid session slots -- the firmware's rotary-encoder selection only ever cycles through six positions, and `macropad/sessions.py` skips (and warns about) any `keys:` entry at index 6 or higher.
+
+**`permission_mode`** (optional, `agent: claude` only) -- passed as Claude Code's own [`--permission-mode`](https://code.claude.com/docs/en/cli-reference) flag when `macropad-sessions` launches this key's session:
+
+- `manual` (or omitted -- this is Claude Code's own default) prompts for approval on every action that needs it.
+- `auto` lets Claude Code's built-in classifier auto-approve low-risk actions, still asking for riskier ones.
+- `bypassPermissions` skips permission checks entirely ("YOLO" mode) -- only use this for a project/session you fully trust running unattended, since nothing will stop it from running any command or editing any file without asking first.
+
+This only takes effect for a session `macropad-sessions` actually starts -- changing it for a key with an already-running tmux session has no effect until that session is stopped (`tmux kill-session -t macropad-key<N>`) and restarted.
 
 ### The rotary encoder -- selecting a session, showing its model, voice input
 
@@ -50,7 +59,9 @@ The OLED's third line shows the selected session's current model (e.g. `Sonnet 4
 
 The fourth line shows the selected session's `label` from `config/keymap.yaml` (e.g. `emexams-website`), so you can always see which repo the knob is pointed at without needing to remember key positions. It updates on the same triggers as the model line (encoder rotation, plus the same poll interval as a self-heal), and is blank for an unconfigured key.
 
-**Pressing the encoder** (if `voice.triggers.encoder: true` in `config/bridge.yaml`) toggles voice-to-text -- same as an action key with `type: voice_toggle`. The OLED's bottom line switches from `MIC: off` to `MIC: REC`. See [Voice input](#voice-input-speak-instead-of-typing) below.
+The fifth line shows that session's current git branch (e.g. `main`), via `git branch --show-current` against its `project_path` -- see `macropad/sessions.py`'s `detect_branch()`. Same refresh triggers as the model/label lines.
+
+**Holding the encoder down** (if `voice.triggers.encoder: true` in `config/bridge.yaml`) drives voice-to-text -- same push-to-talk/tap-to-toggle gestures as an action key with `type: voice_toggle`. While recording (or awaiting a pending-review confirm tap), the OLED's fifth line gets a `*MIC* ` marker prefixed onto the branch name, e.g. `*MIC* main` -- it disappears once the mic goes idle. See [Voice input](#voice-input-speak-instead-of-typing) below.
 
 **Rotating the encoder** normally cycles session selection, as described above. Setting `encoder.rotation_mode: effort` in `config/bridge.yaml` repurposes rotation instead: each detent cycles the *selected* session's Claude Code effort level, same as a `type: cycle_effort` action key (sending `/effort <level>`). Session keys (0-5) still jump selection directly by pressing them in either mode -- only rotation itself changes meaning. The bridge pushes whichever mode is configured to the board on connect, so switching modes just means editing `bridge.yaml` and letting the bridge reconnect (or restart it).
 
@@ -101,9 +112,23 @@ actions:
 
 **`type: voice_toggle` entries:**
 
-- Start/stop voice recording and transcription into the selected session -- same behavior as pressing the encoder. Configure `voice.backend` and API keys in `config/bridge.yaml` / `.env` (see [Voice input](#voice-input-speak-instead-of-typing)).
+- Hold to push-to-talk, release to stop; or tap to start hands-free recording, tap again to stop -- same gestures as the encoder press. This key's LED also shows mic state (dim blue idle / bright blue recording / amber pending review). Configure `voice.backend`, `hold_threshold_ms`, `auto_enter`, and API keys in `config/bridge.yaml` / `.env` (see [Voice input](#voice-input-speak-instead-of-typing)).
+
+**`type: resync` entries:**
+
+- Forces every session key's (0-5) LED to match reality right now, without needing to unplug the pad or restart the bridge -- see [Resyncing LEDs](#resyncing-leds) below for why this is ever needed.
 
 Pressing an action key with nothing configured for it, or while no tmux session is running for the currently selected key, is a silent no-op (logged by the bridge, never raised) -- same fire-and-forget philosophy as everywhere else in this repo.
+
+## Resyncing LEDs
+
+The MacroPad's NeoPixels have **no memory of their own on the host side** -- each key just holds whatever color it was last told, forever, until something explicitly changes it. That has one non-obvious consequence: restarting `macropad-bridge` (a code update, a crash, `Ctrl-C`) does **not** clear the board's LEDs, because the board itself never reboots -- only the bridge process (a separate program on your computer) does. If a key's last-known color came from something that's no longer true -- a session you removed from `keys:`, leftover test traffic sent straight to the bridge's socket, whatever -- it'll keep showing that stale color indefinitely, with nothing to naturally correct it.
+
+Three ways to fix it, roughly cheapest first:
+
+1. **Press the `type: resync` action key**, if you've configured one (see above) -- forces every session key (0-5) to `waiting` (if it has a live tmux session) or `idle` (if not), immediately. This is the easiest option and doesn't require touching a terminal.
+2. **Restart `macropad-bridge`.** On startup it automatically resyncs every session key the same way the `resync` action key does (`Bridge._resync_session_leds`), and self-heals via the periodic model-poll loop if a key's push happened to race the serial connection still (re)establishing. This also fixes anything that depended on bridge-side state (e.g. `cycle_model`/`cycle_effort`'s in-memory position, or a `pending_review` voice state stuck mid-way).
+3. **Unplug and replug the MacroPad** (or trigger a firmware soft-reboot via `Ctrl-D` over the serial console). This is the only option that resets `firmware/code.py`'s own `_key_colors` array from scratch -- necessary if a key is stuck showing a color that doesn't correspond to *any* current state at all (which shouldn't normally happen once `resync` exists, but is the ultimate fallback). `macropad-bridge` reconnects automatically once the board re-enumerates, no separate restart needed on the host side.
 
 ## Wiring action keys to a live session: tmux + Remote Control
 
@@ -118,7 +143,18 @@ Action keys work by injecting text into a **named tmux session** -- `macropad-ke
 
 ## Voice input: speak instead of typing
 
-Pressing the rotary encoder (if `voice.triggers.encoder: true`) or an action key with `type: voice_toggle` toggles recording from this machine's default microphone; pressing again stops recording, transcribes, and sends the result into whichever session is currently selected.
+Hold-and-release the rotary encoder (if `voice.triggers.encoder: true`) or an action key with `type: voice_toggle` to record from this machine's default microphone, then transcribe and send the result into whichever session is currently selected -- classic push-to-talk. A quick tap instead of a hold does something slightly different: recording keeps going hands-free, and a **later** tap stops it -- useful for dictating something longer than you'd want to physically hold a button for.
+
+**Press vs. release, in detail:**
+
+- **Press** always starts recording immediately, whichever gesture it turns out to be.
+- **Release before `voice.hold_threshold_ms`** (default 300ms -- a "tap"): recording keeps running hands-free. The *next* press on the same control stops it (tap-to-toggle).
+- **Release at or after the threshold** (a "hold"): stops recording right there -- push-to-talk.
+- If a transcript is sitting **pending review** (see `auto_enter` below), the next press submits it instead of starting a new recording.
+
+**Reviewing before it's sent** (`voice.auto_enter: false`): by default (`true`) stopping recording sends the transcript and an `Enter` immediately, same as before. Set it `false` and the transcript is typed into the session's input box *without* Enter, so you can read it, fix a misheard word, or delete it entirely, then tap the mic control again to submit (send Enter) once you're happy with it. The mic key's LED (if you've assigned one via `type: voice_toggle`) turns amber while a transcript is pending, so it's visually obvious you still need to confirm.
+
+**Mic key LED** (only for a `type: voice_toggle` action key -- the encoder has no LED of its own): dim blue at rest (marks it as the mic control even when idle), bright blue (pulsing) while actively recording, amber while a transcript awaits your confirm tap. This overrides whatever status color that key would otherwise show.
 
 **Off by default.** To turn it on:
 
@@ -140,11 +176,15 @@ Pressing the rotary encoder (if `voice.triggers.encoder: true`) or an action key
 
 Streaming backends (`openai_realtime`, `together_realtime`) append transcript **deltas** into the selected tmux session as you speak (no Enter until you press stop). Batch backends wait until you stop, then send the full transcript + Enter.
 
+**Mic feedback is instant regardless of backend.** For streaming backends, the WebSocket handshake to OpenAI/Together (a real network round-trip, easily 100ms-1s+) happens in the background *after* the mic LED/OLED already show recording and the microphone itself has started capturing -- audio captured during that handshake is buffered and sent the moment the connection lands, nothing is lost. This means pressing the mic key never waits on the network before you see/hear confirmation it's listening.
+
 Example `config/bridge.yaml`:
 
 ```yaml
 voice:
   enabled: true
+  hold_threshold_ms: 300   # below this = tap-to-toggle, at/above = push-to-talk
+  auto_enter: true          # false = type transcript, wait for a confirm tap
   backend: openai_realtime
   openai:
     api_key_env: OPENAI_API_KEY
@@ -167,9 +207,11 @@ actions:
 Notes:
 
 - API keys live in `.env` (see `.env.example`) -- loaded automatically at bridge startup
-- The OLED bottom line shows `MIC: REC` / `MIC: off` while recording
+- The OLED's fifth line (normally showing the current git branch) gets a `*MIC* ` marker prefixed onto it while recording or pending review
+- With streaming backends (`openai_realtime`, `together_realtime`), text already appears in the session as you speak -- `auto_enter: false` only holds back the final `Enter`, not the streamed text itself
 - Every step degrades cleanly -- missing keys, failed API calls, or no mic all log and no-op
 - PortAudio blocking API is used (not callback) for WSL compatibility -- see `macropad/voice.py`
+- The `type: voice_toggle` key's press/release timing is tracked in firmware (`firmware/code.py`'s `_poll_keys`) and interpreted by the bridge (`macropad/bridge.py`'s `_on_voice_press`/`_on_voice_release`) -- if you reflash older firmware that doesn't send `voice_press`/`voice_release`, the bridge falls back to treating each key press as an immediate toggle (see `_dispatch_action`'s `voice_toggle` branch)
 
 ## `config/colors.yaml` -- what each state looks like
 
@@ -242,13 +284,17 @@ model_poll_interval_seconds: 5
 
 ## Web UI: `macropad-webui`
 
-`uv sync --extra webui && uv run macropad-webui` starts a local web UI at `http://127.0.0.1:8787` for editing `colors.yaml`/`keymap.yaml`/`bridge.yaml` without hand-writing YAML -- a visual pad layout (click an action key 6-11 to configure it), color pickers + pulse toggles for each status, and forms for the voice backend and encoder settings.
+`uv sync --extra webui && uv run macropad-webui` starts a local web UI at `http://127.0.0.1:8787` for editing `colors.yaml`/`keymap.yaml`/`bridge.yaml` without hand-writing YAML -- a visual pad layout (click a session key 0-5 to assign it to a project, or an action key 6-11 to configure its action), color pickers + pulse toggles for each status, and forms for the voice backend and encoder settings.
 
-**Versions, not direct edits.** The UI never writes to `config/` directly. Edits happen against named "versions" under `config-versions/<name>/` (gitignored -- these are your personal drafts, not something to commit) -- full copies of the three editable files. Create/duplicate/rename/delete versions from the version bar at the top; the first run seeds a `default` version from whatever's currently in `config/`. Nothing reaches the live pad until you click **Apply to pad**, which copies the selected version's files over `config/*.yaml` and, if `macropad-bridge` is running, sends it a reload signal so voice/encoder settings take effect immediately (colors/keymap already reload on every access, no signal needed -- see the note at the top of this doc).
+Click a **session key (0-5)** to set its label, project path, agent (Claude Code or Codex CLI), and [`permission_mode`](#session-keys-0-5----keys) -- the same fields `macropad-setup` asks for interactively, or that you'd hand-edit under `keys:`. Leaving the project path blank unassigns the key (its LED stays dark, same as never configuring it).
+
+Whichever **action key (6-11)** has `type: voice_toggle` is highlighted blue in the pad layout (mirroring the physical key's blue LED), so it's obvious at a glance which key is the mic control without opening it.
+
+**Versions, not direct edits.** The UI never writes to `config/` directly. Edits happen against named "versions" under `config-versions/<name>/` (gitignored -- these are your personal drafts, not something to commit) -- full copies of the three editable files. Create/duplicate/rename/delete versions from the version bar at the top; the first run seeds a `default` version from whatever's currently in `config/`. Nothing reaches the live pad until you click **Apply to pad**, which copies the selected version's files over `config/*.yaml` and, if `macropad-bridge` is running, sends it a reload signal so voice/encoder settings take effect immediately (colors/keymap already reload on every access, no signal needed -- see the note at the top of this doc). Changing a session key's project/agent/permission_mode doesn't restart an already-running tmux session for that key -- see the note at the end of [permission_mode](#session-keys-0-5----keys).
 
 Edits are written back with `ruamel.yaml`'s round-trip mode, not a full re-dump -- only the values you actually changed are touched, so hand-written comments, key order, and formatting elsewhere in the file survive. This matters because these files are meant to be read (and still hand-editable) even if you mostly use the UI.
 
-Out of scope for the UI: which project each session key (0-5) points at (`macropad-setup` or hand-edit `keys:` -- these are read-only in the pad-layout view) and `config/usage.yaml`.
+Out of scope for the UI: `config/usage.yaml`.
 
 ## `config/usage.yaml` -- OLED usage dashboard
 
@@ -325,7 +371,7 @@ Run `uv run macropad-setup` again any time to change `enabled`/`source` interact
 
 Per-key LED behavior, the OLED dashboard layout, the selection-brightness/status-pulse rendering, and how JSON messages are parsed (in both directions) all live in [`firmware/code.py`](../firmware/code.py) on the MacroPad itself, not in this repo's Python. If you change it, re-copy the file to `CIRCUITPY/code.py` (or `uv run macropad-flash`, see [troubleshooting.md](troubleshooting.md#updating-firmware-over-wslusb-write-protect-errors-reverted-files)) -- no reboot needed, CircuitPython reloads `code.py` automatically on save.
 
-The OLED shows five lines total: two usage metrics (`5H [bar] 42%` / `7D [bar] 18%`, no header), a third line for the selected session's model name and (if known) effort level shown together as `Sonnet 4.5 - high`, a fourth line for the selected session's project label, and a fifth/bottom line as a compact status bar (currently just `MIC: off`/`MIC: REC`, deliberately terse to leave room for more fields later). To change how the usage bars *look* (e.g. wider bars) without touching the token-counting logic, edit the constants and `_render_bar`/`_render_metric_line`/`_apply_usage_message` near the top of `code.py`. `BAR_WIDTH` is deliberately conservative (10 chars) to leave room for the label and percentage on the same line within the OLED's 128px width at the built-in font's ~6px glyph width -- widen it carefully if you switch fonts or shorten the labels further. The third/fourth/fifth lines' rendering lives in `_apply_model_message`/`_apply_effort_message`/`_apply_label_message`/`_apply_recording_message`.
+The OLED shows five lines total: two usage metrics (`5H [bar] 42%` / `7D [bar] 18%`, no header), a third line for the selected session's model name and (if known) effort level shown together as `Sonnet 4.5 - high`, a fourth line for the selected session's project label, and a fifth/bottom line for that session's current git branch, e.g. `main` (from `sessions.detect_branch()` -- runs `git branch --show-current` against the key's `project_path`, not a tmux-pane scrape) with a `*MIC* ` marker prefixed onto it while voice recording is active or a transcript is pending review, e.g. `*MIC* main`. The marker disappears once the mic goes idle, so the line spends most of its time just showing the branch -- deliberately terse to leave room for the branch name within the OLED's 128px width at the built-in font's ~6px glyph width (about 21 characters). To change how the usage bars *look* (e.g. wider bars) without touching the token-counting logic, edit the constants and `_render_bar`/`_render_metric_line`/`_apply_usage_message` near the top of `code.py`. `BAR_WIDTH` is deliberately conservative (10 chars) to leave room for the label and percentage on the same line. The third/fourth/fifth lines' rendering lives in `_apply_model_message`/`_apply_effort_message`/`_apply_label_message`/`_apply_branch_message`/`_render_branch_line`.
 
 The encoder's rotation mode (`session` vs `effort` -- see `config/bridge.yaml`'s `encoder.rotation_mode` above) is pushed from the host as `{"encoder_mode": "..."}` and stored in `_encoder_mode`; `_poll_encoder()` branches on it to decide whether a detent updates `_selected_key` (sending `{"selected": N}`) or forwards the raw delta to the host as `{"encoder_delta": N}` for the bridge to turn into an `/effort` cycle. The board has no config file of its own, so this mode is always host-driven, not something you set locally on the pad.
 
@@ -333,4 +379,9 @@ The encoder's rotation mode (`session` vs `effort` -- see `config/bridge.yaml`'s
 
 Per-key LED rendering (both the selection brightness boost and the status pulse) happens every main-loop iteration in `_render_key_leds()`, driven by the `_key_colors`/`_key_pulsing` caches that `_apply_led_message()` fills in from each `{"key", "color", "pulse"}` message. To change the pulse animation's speed/depth or the selection brightness boost, edit `_PULSE_PERIOD_SECONDS`/`_PULSE_MIN_SCALE`/`_SELECTED_BRIGHTNESS_SCALE` near `_render_key_leds()`. `SESSION_KEY_COUNT` (how many keys the encoder cycles through) and `ACTION_KEY_START` (where action keys begin) are also constants there if you ever want a different split than 6/6 -- just remember to keep `config/keymap.yaml`'s `actions:` indices and `macropad/sessions.py`'s `SESSION_KEY_COUNT` in sync if you do.
 
-The encoder's push-button is polled by `_poll_encoder_switch()` using the MacroPad library's built-in debouncer (`macropad.encoder_switch_debounced`) -- it sends `{"encoder_press": true}` once per physical press, with debouncing handled entirely on the board.
+**Voice press/release timing** (push-to-talk vs. tap-to-toggle -- see [Voice input](#voice-input-speak-instead-of-typing) above) is tracked entirely in firmware, since it needs sub-poll-interval press/release timestamps the host can't observe directly:
+
+- The encoder's push-button is polled by `_poll_encoder_switch()` using the MacroPad library's built-in debouncer (`macropad.encoder_switch_debounced`, `.pressed`/`.released`). On press it records `time.monotonic()` and sends `{"voice_press": true, "source": "encoder"}`; on release it computes elapsed milliseconds and sends `{"voice_release": true, "source": "encoder", "held_ms": N}`.
+- Whichever action key (if any) has `type: voice_toggle` is announced by the host as `{"voice_key": N}` (or `null`) -- see `macropad/bridge.py`'s `_push_voice_key()`. `_poll_keys()` checks incoming key events against `_voice_key` *before* the normal action-key dispatch, and if it matches, tracks that key's own press/release timing the same way instead of sending the usual one-shot `{"action": N}`.
+- The bridge (`macropad/bridge.py`'s `_on_voice_press`/`_on_voice_release`) is what actually interprets `held_ms` against `voice.hold_threshold_ms` and decides push-to-talk vs. tap-to-toggle vs. submit-pending-review -- the board itself has no opinion on timing thresholds, it just reports what happened and when.
+- The mic key's LED (`_mic_led_state`, set via `{"mic_led": "idle"|"recording"|"pending_review"}`) is rendered as an override in `_render_key_leds()` -- see `_MIC_IDLE_COLOR`/`_MIC_RECORDING_COLOR`/`_MIC_PENDING_REVIEW_COLOR` near the mic key/LED section of `code.py` if you want to change the colors. `recording` pulses using the same `pulse_scale` as status-pulsing keys; `idle`/`pending_review` are flat.

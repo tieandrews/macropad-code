@@ -72,10 +72,23 @@ def has_session(key: int) -> bool:
     return _has_named_session(session_name(key))
 
 
+VALID_PERMISSION_MODES = {"manual", "auto", "bypassPermissions"}
+
+
 def _launch_command(entry: dict, label: str) -> str:
     agent = entry.get("agent", "claude")
     if agent == "claude":
-        return f"claude --remote-control {shlex.quote(label)}"
+        command = f"claude --remote-control {shlex.quote(label)}"
+        permission_mode = entry.get("permission_mode")
+        if permission_mode:
+            if permission_mode not in VALID_PERMISSION_MODES:
+                print(f"[macropad-sessions] warning: unknown permission_mode "
+                      f"{permission_mode!r} -- expected one of "
+                      f"{', '.join(sorted(VALID_PERMISSION_MODES))}. Passing it "
+                      "through to Claude Code anyway in case it's a newer mode "
+                      "this repo doesn't know about yet.", flush=True)
+            command += f" --permission-mode {shlex.quote(permission_mode)}"
+        return command
     if agent == "codex":
         print(
             "[macropad-sessions] note: Codex CLI has no equivalent of "
@@ -214,6 +227,71 @@ def detect_model(key: int) -> Optional[str]:
     if not matches:
         return None
     return " ".join(matches[-1].group(0).split())
+
+
+def detect_branch(key: int) -> Optional[str]:
+    """Best-effort: the current git branch of `key`'s configured
+    project_path, via `git branch --show-current` -- unlike
+    detect_model() this doesn't scrape the tmux pane at all, it just
+    asks git directly, so it works regardless of what Claude Code's UI
+    happens to be showing at that instant. Returns None if the key has
+    no project_path configured, the path isn't a git repo, or git isn't
+    on PATH -- a session running on your own machine but not committed
+    to a checked-out branch (detached HEAD) also returns None, since
+    --show-current is intentionally blank in that case rather than
+    printing a commit hash. Never raises."""
+    keys = config.load_keymap().get("keys") or {}
+    entry = keys.get(key) or keys.get(str(key))
+    project_path = (entry or {}).get("project_path")
+    if not project_path:
+        return None
+    cwd = str(Path(project_path).expanduser())
+    try:
+        result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=cwd, capture_output=True, text=True, timeout=2,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    branch = result.stdout.strip()
+    return branch or None
+
+
+_SWITCH_MODEL_PROMPT_RE = re.compile(r"Switch model\?")
+# How many times / how often to re-check the pane for the confirmation
+# menu after sending `/model`. It doesn't appear instantly -- Claude Code
+# renders it a beat after the command is submitted -- and it also doesn't
+# always appear at all (seems tied to whether there's cached conversation
+# history to warn about), so this is a short, bounded poll rather than a
+# single fixed-delay check or an open-ended wait.
+_CONFIRM_POLL_ATTEMPTS = 4
+_CONFIRM_POLL_INTERVAL_SECONDS = 0.5
+
+
+def confirm_model_switch_if_pending(key: int) -> bool:
+    """Best-effort: after sending `/model <name>`, Claude Code
+    sometimes (not always -- seems related to how much cached
+    conversation history the switch would discard) shows a "Switch
+    model?" confirmation menu ("1. Yes, switch to X" / "2. No, go
+    back") instead of switching immediately. Since the macropad action
+    that triggered the switch in the first place *is* the user's
+    confirmation, this polls the pane briefly for that menu and answers
+    "1" + Enter if it shows up, so a cycle_model press never silently
+    stalls waiting on a prompt nobody's watching. Returns True if a
+    prompt was found and answered, False otherwise (including if the
+    session isn't running, or the switch just went through with no
+    prompt at all -- the overwhelmingly common case) -- never raises."""
+    import time
+
+    for _ in range(_CONFIRM_POLL_ATTEMPTS):
+        time.sleep(_CONFIRM_POLL_INTERVAL_SECONDS)
+        text = capture_pane(key)
+        if text and _SWITCH_MODEL_PROMPT_RE.search(text):
+            send_to_session(key, "1", send_enter=True)
+            return True
+    return False
 
 
 def attach(key: int) -> None:

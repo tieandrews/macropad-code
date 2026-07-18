@@ -131,14 +131,17 @@ def _coerce_key(new_key, existing_keys):
     merge would see string keys as "not in existing", delete the
     original int-keyed entries (and their comments) and re-add
     string-keyed duplicates. Matches new_key against whichever key type
-    is already on disk; only falls back to the raw string for keys that
-    are genuinely new."""
+    is already on disk. For a genuinely new digit-string key (e.g.
+    adding session key 3 for the first time, which has no existing
+    entry to match against), still coerces to int rather than leaving
+    it a raw string -- `keys:`/`actions:` are always int-keyed in this
+    schema, and code elsewhere (e.g. bridge.py's _send_selected_label)
+    does plain int lookups without a string fallback, so a stray
+    string key would silently never match."""
     if new_key in existing_keys:
         return new_key
     if isinstance(new_key, str) and new_key.lstrip("-").isdigit():
-        as_int = int(new_key)
-        if as_int in existing_keys:
-            return as_int
+        return int(new_key)
     return new_key
 
 

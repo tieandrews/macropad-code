@@ -153,9 +153,13 @@
     padding: 0.3rem;
     color: var(--text-dim);
   }
-  .key.session { background: var(--key-session); }
+  .key.session { background: var(--key-session); cursor: pointer; }
+  .key.session:hover { border-color: var(--accent); }
   .key.action { background: var(--key-action); cursor: pointer; }
   .key.action:hover { border-color: var(--accent); }
+  .key.action.mic { background: #0d2a5c; border-color: #2f6fd6; }
+  .key.action.mic:hover { border-color: #5b9dff; }
+  .key.action.mic .key-label::before { content: "\1F3A4  "; }
   .key .key-num { font-size: 0.65rem; opacity: 0.6; }
   .key .key-label { color: var(--text); font-weight: 600; font-size: 0.72rem; }
   .row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.6rem; }
@@ -236,7 +240,7 @@
         <div class="key-grid" id="sessionKeys"></div>
         <div class="key-grid" id="actionKeys"></div>
       </div>
-      <div class="hint">Keys 0-5 (top) are session keys, assigned via <code>macropad-setup</code> or hand-editing keymap.yaml -- not edited here. Click a key 6-11 (bottom) to configure its action.</div>
+      <div class="hint">Click a key 0-5 (top) to assign it to a project, or a key 6-11 (bottom, highlighted blue if it's the mic toggle) to configure its action.</div>
     </div>
 
     <div class="panel">
@@ -303,12 +307,48 @@
         <option value="cycle_model">Cycle model</option>
         <option value="cycle_effort">Cycle effort</option>
         <option value="voice_toggle">Mic toggle</option>
+        <option value="resync">Resync LEDs</option>
       </select>
     </div>
     <div id="keyTypeFields"></div>
     <div class="modal-actions">
       <button id="keyModalCancel">Cancel</button>
       <button id="keyModalSave" class="primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="sessionModalBackdrop">
+  <div class="modal">
+    <h3 id="sessionModalTitle">Configure session key</h3>
+    <div class="row">
+      <label>Label</label>
+      <input type="text" id="sessionLabel" placeholder="e.g. my-project">
+    </div>
+    <div class="row">
+      <label>Project path</label>
+      <input type="text" id="sessionProjectPath" placeholder="/home/you/projects/my-project">
+    </div>
+    <div class="row">
+      <label>Agent</label>
+      <select id="sessionAgent">
+        <option value="claude">Claude Code</option>
+        <option value="codex">Codex CLI</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>Permission mode</label>
+      <select id="sessionPermissionMode">
+        <option value="">(default -- manual)</option>
+        <option value="manual">Manual</option>
+        <option value="auto">Auto</option>
+        <option value="bypassPermissions">Bypass (YOLO)</option>
+      </select>
+    </div>
+    <div class="hint">Passed as Claude Code's <code>--permission-mode</code> flag when this session is launched via <code>macropad-sessions</code>. Codex CLI ignores this. Leaving a key's project path empty leaves it unassigned -- its LED stays dark.</div>
+    <div class="modal-actions">
+      <button id="sessionModalCancel">Cancel</button>
+      <button id="sessionModalSave" class="primary">Save</button>
     </div>
   </div>
 </div>
@@ -497,6 +537,7 @@ function renderPad() {
     const div = document.createElement('div');
     div.className = 'key session';
     div.innerHTML = `<div class="key-num">${k}</div><div class="key-label">${entry ? entry.label : '(unassigned)'}</div>`;
+    div.addEventListener('click', () => openSessionModal(k));
     sessionEl.appendChild(div);
   }
 
@@ -504,8 +545,9 @@ function renderPad() {
   actionEl.innerHTML = '';
   for (const k of ACTION_KEYS) {
     const entry = actions[k] || actions[String(k)];
+    const isMic = entry && entry.type === 'voice_toggle';
     const div = document.createElement('div');
-    div.className = 'key action';
+    div.className = 'key action' + (isMic ? ' mic' : '');
     div.innerHTML = `<div class="key-num">${k}</div><div class="key-label">${entry ? entry.label : '(none)'}</div>`;
     div.addEventListener('click', () => openKeyModal(k));
     actionEl.appendChild(div);
@@ -589,6 +631,51 @@ function renderEncoder() {
   };
 }
 
+// --- session key modal ---------------------------------------------------
+
+function openSessionModal(keyNum) {
+  state.editingSessionKey = keyNum;
+  const keymap = state.config.keymap || (state.config.keymap = {});
+  const keys = keymap.keys || (keymap.keys = {});
+  const entry = keys[keyNum] || keys[String(keyNum)] || {};
+
+  $('sessionModalTitle').textContent = `Configure session key ${keyNum}`;
+  $('sessionLabel').value = entry.label || '';
+  $('sessionProjectPath').value = entry.project_path || '';
+  $('sessionAgent').value = entry.agent || 'claude';
+  $('sessionPermissionMode').value = entry.permission_mode || '';
+  $('sessionModalBackdrop').classList.add('open');
+}
+
+$('sessionModalCancel').addEventListener('click', () => $('sessionModalBackdrop').classList.remove('open'));
+
+$('sessionModalSave').addEventListener('click', () => {
+  const keyNum = state.editingSessionKey;
+  const keymap = state.config.keymap || (state.config.keymap = {});
+  const keys = keymap.keys || (keymap.keys = {});
+  const projectPath = $('sessionProjectPath').value.trim();
+
+  delete keys[String(keyNum)];
+  if (!projectPath) {
+    // No project path -- leave this key unassigned, same as never
+    // having configured it (LED stays dark, no tmux session to start).
+    delete keys[keyNum];
+  } else {
+    const entry = {
+      label: $('sessionLabel').value.trim() || `key${keyNum}`,
+      agent: $('sessionAgent').value,
+      project_path: projectPath,
+    };
+    const permissionMode = $('sessionPermissionMode').value;
+    if (permissionMode) entry.permission_mode = permissionMode;
+    keys[keyNum] = entry;
+  }
+
+  $('sessionModalBackdrop').classList.remove('open');
+  renderPad();
+  scheduleSave();
+});
+
 // --- action key modal --------------------------------------------------
 
 function openKeyModal(keyNum) {
@@ -623,8 +710,10 @@ function renderKeyTypeFields(entry) {
       <div class="row"><label>Levels</label><input type="text" id="fld_levels" value="${(entry.levels || ['low','medium','high','max']).join(', ')}"></div>
       <div class="hint">Comma-separated, sends <code>/effort &lt;level&gt;</code>.</div>
     `;
-  } else {
+  } else if (type === 'voice_toggle') {
     container.innerHTML = `<div class="hint">Toggles voice recording, same as the encoder press.</div>`;
+  } else if (type === 'resync') {
+    container.innerHTML = `<div class="hint">Forces every session key's (0-5) LED to match reality right now -- fixes a key stuck showing a stale color without needing to unplug the pad.</div>`;
   }
 }
 
@@ -648,6 +737,8 @@ $('keyModalSave').addEventListener('click', () => {
     entry.levels = ($('fld_levels').value || '').split(',').map(s => s.trim()).filter(Boolean);
   } else if (type === 'voice_toggle') {
     entry.type = 'voice_toggle';
+  } else if (type === 'resync') {
+    entry.type = 'resync';
   }
   delete actions[String(keyNum)];
   actions[keyNum] = entry;

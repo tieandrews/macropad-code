@@ -19,7 +19,7 @@ The 12 keys split into two roles:
 | `error` | dark red | yes | agent or a hook hit an error |
 | `idle` | dim green | no | no active session |
 
-The OLED shows a compact dashboard: two lines of current session/trailing-week token usage (Claude Code only), read from Claude Code's own local session history, a third line showing which model the selected session is using, a fourth line showing which repo/project it is, and a bottom line for mic/voice-input status -- see [Usage display](#usage-display) below.
+The OLED shows a compact dashboard: two lines of current session/trailing-week token usage (Claude Code only), read from Claude Code's own local session history, a third line showing which model the selected session is using, a fourth line showing which repo/project it is, and a bottom line showing that session's current git branch (with a `*MIC*` marker while voice input is active) -- see [Usage display](#usage-display) below.
 
 ## How it works
 
@@ -81,7 +81,7 @@ The MacroPad's screen can show a live dashboard of your Claude Code token usage,
 7D [##........] 18%
 Sonnet 4.5
 emexams-website
-MIC: off
+main
 ```
 
 There's no official Anthropic API for your exact Pro/Max session/weekly quota, so `config/usage.yaml`'s `source:` lets you pick how these numbers get populated:
@@ -92,7 +92,7 @@ There's no official Anthropic API for your exact Pro/Max session/weekly quota, s
 
 Whichever you pick, a failure always falls back to `local_estimate` rather than showing nothing. Codex CLI has no local equivalent to any of these, so usage display is Claude Code only.
 
-The model and project lines are independent of `usage.yaml` entirely -- the model is detected by the bridge snapshotting the *selected* session's tmux pane every few seconds (`config/bridge.yaml`'s `model_poll_interval_seconds`), so it's only available once you've got that session running via `macropad-sessions` (below); the project line is just that key's `label` from `config/keymap.yaml`, so it's available as soon as the key is configured.
+The model, project, and branch lines are independent of `usage.yaml` entirely -- the model is detected by the bridge snapshotting the *selected* session's tmux pane every few seconds (`config/bridge.yaml`'s `model_poll_interval_seconds`), so it's only available once you've got that session running via `macropad-sessions` (below); the project line is just that key's `label` from `config/keymap.yaml`, so it's available as soon as the key is configured; the branch line runs `git branch --show-current` against the key's `project_path` on the same poll interval, so it's available as soon as that path is a git repo (no running session required).
 
 ## Action keys: steering a session
 
@@ -121,7 +121,7 @@ To actually *look at* whichever session is currently selected without repeatedly
 
 ## Voice input
 
-Press the rotary encoder (or an action key with `type: voice_toggle`) to start recording from your microphone, press again to stop -- transcription is sent into the selected session. Backends are configurable in `config/bridge.yaml` (`local_whisper`, `openai_realtime` for streaming gpt-realtime-whisper, `openai_gpt4o_mini`, `together_whisper`, etc.) -- see [docs/customization.md](docs/customization.md#voice-input-speak-instead-of-typing). API keys go in `.env` (copy from `.env.example`). The OLED's bottom line shows `MIC: REC` the whole time, `MIC: off` otherwise.
+Press the rotary encoder (or an action key with `type: voice_toggle`) to start recording from your microphone, press again to stop -- transcription is sent into the selected session. Backends are configurable in `config/bridge.yaml` (`local_whisper`, `openai_realtime` for streaming gpt-realtime-whisper, `openai_gpt4o_mini`, `together_whisper`, etc.) -- see [docs/customization.md](docs/customization.md#voice-input-speak-instead-of-typing). API keys go in `.env` (copy from `.env.example`). The OLED's bottom line (normally the current git branch) gets a `*MIC*` marker prefixed onto it while recording, disappearing once you're done.
 
 Off by default -- it needs the optional `voice` extra (`uv sync --extra voice`), the system-level PortAudio library (`sudo apt install libportaudio2` on Debian/Ubuntu/WSL), and a microphone actually reachable from wherever the bridge runs. Then set `voice.enabled: true` in `config/bridge.yaml` and restart the bridge. See [docs/customization.md](docs/customization.md#voice-input-speak-instead-of-typing) for the full setup, including WSL-specific microphone notes.
 
@@ -133,6 +133,17 @@ Off by default -- it needs the optional `voice` extra (`uv sync --extra voice`),
 - **OLED usage dashboard (windows, budgets, poll interval):** [`config/usage.yaml`](config/usage.yaml)
 
 All four are plain YAML -- see [docs/customization.md](docs/customization.md) for the full reference. No code changes needed for everyday tweaks.
+
+### Web UI (no YAML editing required)
+
+Prefer clicking to hand-editing YAML? Launch the config UI:
+
+```bash
+uv sync --extra webui
+uv run macropad-webui
+```
+
+Then open **http://127.0.0.1:8787**. It's a visual editor for LED colors, action keys, and voice/encoder settings, with draft "versions" you can tweak and preview before hitting **Apply to pad** to push them live -- see [docs/customization.md](docs/customization.md#web-ui-macropad-webui) for details.
 
 ## Docs
 
@@ -160,6 +171,8 @@ macropad/            host-side Python package
   firmware_flash.py       pushes firmware/*.py over the serial REPL (macropad-flash) -- see docs/troubleshooting.md
   client.py            tiny client hooks use to talk to the daemon
   setup_cli.py          the interactive `macropad-setup` command
+  webui.py               local config-editing web UI (macropad-webui)
+  webui_static/           its single-page frontend (index.html)
   hooks/               Claude Code / Codex CLI hook entry points
   services/             launchd / systemd / Windows startup templates
 config/              human-edited YAML: keymap.yaml (keys + actions), colors.yaml, bridge.yaml, usage.yaml

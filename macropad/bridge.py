@@ -78,15 +78,27 @@ class Bridge:
         self._model_stop = threading.Event()
         self._model_thread: threading.Thread | None = None
         self._last_sent_model: str | None = "__unset__"  # force one send on first poll
+        self._last_sent_branch: str | None = "__unset__"  # force one send on first poll
 
         self._voice_settings = voice_settings or {}
         self._recording = False
         self._recorder = None
         self._stt = None
         self._streamed_chars = 0
+        # Voice press/release/review state machine -- see _on_voice_press
+        # and _on_voice_release. "idle": nothing happening.
+        # "recording_undecided": press just happened, haven't seen the
+        # release yet (or it hasn't been long enough to classify).
+        # "recording_toggle_armed": a quick tap started recording and
+        # it's continuing hands-free; the next press stops it.
+        # "pending_review": stopped without auto_enter, transcript is
+        # sitting in the pane; the next press submits it (sends Enter).
+        self._voice_state = "idle"
+        self._voice_pending_session_key: int | None = None
         self._model_index: dict[int, int] = {}  # session key -> cycle_model position
         self._effort_index: dict[int, int] = {}  # session key -> cycle_effort position
         self._last_sent_effort: dict[int, str] = {}  # session key -> last /effort level sent
+        self._key_states: dict[int, str] = {}  # session key -> last state name sent (e.g. "waiting")
         encoder_settings = encoder_settings or {}
         rotation_mode = encoder_settings.get("rotation_mode", "session")
         self._encoder_rotation_mode = rotation_mode if rotation_mode in ("session", "effort") else "session"
@@ -100,6 +112,19 @@ class Bridge:
         state = msg.get("state")
         if key is None or state is None:
             return
+        self._key_states[key] = state
+        self._push_key_state(key, state)
+
+    def _push_key_state(self, key: int, state: str) -> bool:
+        """Resolves `state` to a color/pulse via the currently-loaded
+        colors.yaml and pushes it for `key`. Split out from _on_message
+        so _reload_config can replay every already-lit key's last known
+        state against newly-edited colors -- otherwise a key lit before
+        an "Apply to pad" wouldn't visually update until its next hook
+        event, which could be arbitrarily far off. Returns whether the
+        write actually reached the board (False if it's not connected
+        yet/still) -- callers that need the push to eventually land
+        (see _resync_session_leds) use this to know whether to retry."""
         color = config.color_for_state(state)
         pulse = config.pulse_for_state(state)
         payload = json.dumps({"key": key, "color": color, "pulse": pulse})
@@ -107,6 +132,7 @@ class Bridge:
         status = "sent" if ok else "dropped (MacroPad not connected)"
         print(f"[macropad-bridge] key={key} state={state} color={color} "
               f"pulse={pulse} -> {status}", flush=True)
+        return ok
 
     def _reload_config(self) -> None:
         """Re-reads config/bridge.yaml's `voice`/`encoder` settings into
@@ -114,14 +140,24 @@ class Bridge:
         is already read fresh on every access (see macropad/config.py),
         so this only matters for the two things cached at construction
         time. Triggered by the web UI's "Apply to pad" (see webui.py) so
-        changes take effect without a manual bridge restart."""
+        changes take effect without a manual bridge restart.
+
+        Also replays every key's last known state (self._key_states)
+        against the freshly-loaded colors.yaml, so keys already lit
+        before the edit visually update immediately -- otherwise a color
+        change wouldn't show up on an already-lit key until its next
+        unrelated hook event, which could be arbitrarily far off."""
         settings = config.load_bridge_settings()
         self._voice_settings = settings.get("voice", {})
         encoder_settings = settings.get("encoder", {}) or {}
         rotation_mode = encoder_settings.get("rotation_mode", "session")
         self._encoder_rotation_mode = rotation_mode if rotation_mode in ("session", "effort") else "session"
         self._push_encoder_mode()
-        print("[macropad-bridge] config reloaded (voice + encoder settings)", flush=True)
+        self._push_voice_key()  # keymap.yaml's voice_toggle key may have changed too
+        for key, state in self._key_states.items():
+            self._push_key_state(key, state)
+        print(f"[macropad-bridge] config reloaded (voice + encoder settings, "
+              f"{len(self._key_states)} key LED(s) refreshed)", flush=True)
 
     def _on_board_line(self, line: str) -> None:
         """Handles a message the *board* sent us: encoder selection
@@ -145,6 +181,7 @@ class Bridge:
             print(f"[macropad-bridge] selected session key={self._selected_key}", flush=True)
             self._send_selected_label()
             self._poll_model_once()  # don't make the user wait for the next scheduled poll
+            self._poll_branch_once()
             self._push_effort_to_oled()
             sessions.sync_follow_session(self._selected_key)
             return
@@ -157,10 +194,22 @@ class Bridge:
             self._dispatch_action(action_key)
             return
 
-        if "encoder_press" in msg:
-            triggers = self._voice_settings.get("triggers") or {}
-            if triggers.get("encoder", True):
-                self._toggle_voice(trigger="encoder press")
+        if "voice_press" in msg:
+            source = msg.get("source", "?")
+            if source == "encoder":
+                triggers = self._voice_settings.get("triggers") or {}
+                if not triggers.get("encoder", True):
+                    return
+            self._on_voice_press(trigger=f"{source} press")
+            return
+
+        if "voice_release" in msg:
+            try:
+                held_ms = int(msg.get("held_ms", 0))
+            except (TypeError, ValueError):
+                held_ms = 0
+            source = msg.get("source", "?")
+            self._on_voice_release(held_ms, trigger=f"{source} release")
             return
 
         if "encoder_delta" in msg:
@@ -198,7 +247,18 @@ class Bridge:
             return
 
         if entry.get("type") == "voice_toggle":
-            self._toggle_voice(trigger=f"action key {action_key} ({label})")
+            # Normally unreachable: current firmware diverts this key's
+            # presses into {"voice_press"/"voice_release"} instead of
+            # {"action": N} once it's been announced via _push_voice_key()
+            # (see firmware/code.py's _poll_keys). Kept as a fallback for
+            # older/mismatched firmware that doesn't know about that yet.
+            self._on_voice_press(trigger=f"action key {action_key} ({label})")
+            return
+
+        if entry.get("type") == "resync":
+            self._resync_session_leds(force=True)
+            print(f"[macropad-bridge] action='{label}' -> resynced all session key LEDs",
+                  flush=True)
             return
 
         from . import sessions
@@ -225,6 +285,22 @@ class Bridge:
               f"'{next_model}' {status}", flush=True)
         if ok:
             self._poll_model_once()  # refresh the OLED once the switch has had a moment to land
+            # Claude Code sometimes (not always) shows a "Switch model?"
+            # confirmation menu instead of switching right away -- see
+            # sessions.confirm_model_switch_if_pending's docstring. Runs
+            # in the background so a pending confirmation's ~0.5-2s poll
+            # never delays the next key press being handled.
+            threading.Thread(
+                target=self._confirm_model_switch, args=(key, next_model), daemon=True
+            ).start()
+
+    def _confirm_model_switch(self, key: int, next_model: str) -> None:
+        from . import sessions
+
+        if sessions.confirm_model_switch_if_pending(key):
+            print(f"[macropad-bridge] session key={key} confirmed pending "
+                  f"'Switch model?' prompt for '{next_model}'", flush=True)
+            self._poll_model_once()  # the switch only just actually landed -- refresh the OLED again
 
     def _advance_effort(self, key: int, levels: list, step: int, trigger: str) -> None:
         """Shared by the cycle_effort action key and encoder rotation (in
@@ -251,19 +327,74 @@ class Bridge:
             if key == self._selected_key:
                 self._push_effort_to_oled()
 
-    def _toggle_voice(self, trigger: str = "voice toggle") -> None:
+    # Below this held_ms, a press/release is a "tap" (arms toggle mode --
+    # recording keeps going hands-free until the next press). At or above
+    # it, the release itself stops recording (hold-to-talk). See
+    # config/bridge.yaml's voice.hold_threshold_ms.
+    DEFAULT_HOLD_THRESHOLD_MS = 300
+
+    def _on_voice_press(self, trigger: str) -> None:
         if not self._voice_settings.get("enabled", False):
-            print("[macropad-bridge] voice toggle but voice input is disabled -- set "
+            print("[macropad-bridge] voice press but voice input is disabled -- set "
                   "voice.enabled: true in config/bridge.yaml. See docs/customization.md.",
                   flush=True)
             return
 
-        if not self._recording:
-            self._start_voice(trigger)
-        else:
-            self._stop_voice(trigger)
+        if self._voice_state == "idle":
+            if self._start_voice(trigger):
+                self._voice_state = "recording_undecided"
+            return
 
-    def _start_voice(self, trigger: str) -> None:
+        if self._voice_state == "recording_toggle_armed":
+            # Second tap while hands-free recording -- this press means
+            # "stop", same as the old tap-to-toggle behavior.
+            self._stop_voice(trigger)
+            return
+
+        if self._voice_state == "pending_review":
+            # Transcript is sitting in the pane awaiting confirmation --
+            # this press submits it (sends Enter) rather than starting a
+            # new recording.
+            self._submit_pending_review(trigger)
+            return
+
+        # "recording_undecided": a press here would mean the button is
+        # somehow reporting a second press-down before its release --
+        # shouldn't happen physically, ignore defensively.
+
+    def _on_voice_release(self, held_ms: int, trigger: str) -> None:
+        if self._voice_state != "recording_undecided":
+            # Release from a press that was actually the "stop" tap (in
+            # recording_toggle_armed) or the "confirm" tap (in
+            # pending_review) -- already fully handled on press, nothing
+            # more to do on release.
+            return
+
+        threshold = (self._voice_settings.get("hold_threshold_ms")
+                     or self.DEFAULT_HOLD_THRESHOLD_MS)
+        if held_ms >= threshold:
+            self._stop_voice(f"{trigger}, held {held_ms}ms")
+        else:
+            self._voice_state = "recording_toggle_armed"
+            print(f"[macropad-bridge] voice recording continuing hands-free "
+                  f"({trigger}, held {held_ms}ms < {threshold}ms threshold -- tap again to stop)",
+                  flush=True)
+
+    def _submit_pending_review(self, trigger: str) -> None:
+        from . import sessions
+
+        key = self._voice_pending_session_key
+        self._voice_pending_session_key = None
+        self._voice_state = "idle"
+        self._push_mic_led()
+        if key is None:
+            return
+        ok = sessions.send_to_session(key, "", send_enter=True)
+        status = "sent" if ok else "failed (no tmux session running for the selected key?)"
+        print(f"[macropad-bridge] voice transcript confirmed ({trigger}) -> session key={key} "
+              f"{status}", flush=True)
+
+    def _start_voice(self, trigger: str) -> bool:
         from . import voice
         from .stt import create_backend
 
@@ -272,7 +403,7 @@ class Bridge:
         except Exception as exc:
             print(f"[macropad-bridge] voice backend setup failed: {exc}", flush=True)
             self._stt = None
-            return
+            return False
 
         self._streamed_chars = 0
         backend = self._voice_settings.get("backend", "local_whisper")
@@ -295,20 +426,31 @@ class Bridge:
                     sessions.send_to_session(session_key, remainder, send_enter=False)
                     self._streamed_chars += len(remainder)
 
-            if not self._stt.start(on_delta=on_delta, on_completed=on_completed):
-                print(f"[macropad-bridge] couldn't start streaming STT ({backend})",
-                      flush=True)
-                self._stt.close()
-                self._stt = None
-                return
-
+            # Start the mic capturing *before* the streaming backend's
+            # handshake (a real network round-trip -- e.g. a WebSocket
+            # connect to OpenAI/Together, easily 100ms-1s+) rather than
+            # after it. feed_audio() on these backends already buffers
+            # audio it receives before the connection is up (see
+            # RealtimeWebSocketBackend._pending_chunks), so nothing is
+            # lost -- this just means the mic LED/recording state (and
+            # the mic itself) go live the instant you press, instead of
+            # waiting on the network before you get any feedback at all.
             recorder = voice.Recorder()
             if not recorder.start(on_chunk=self._stt.feed_audio):
                 print("[macropad-bridge] couldn't start voice recording (no microphone / "
                       "missing dependencies -- see docs/customization.md)", flush=True)
                 self._stt.close()
                 self._stt = None
-                return
+                return False
+
+            stt = self._stt
+
+            def connect_backend() -> None:
+                if not stt.start(on_delta=on_delta, on_completed=on_completed):
+                    print(f"[macropad-bridge] couldn't start streaming STT ({backend})",
+                          flush=True)
+
+            threading.Thread(target=connect_backend, daemon=True).start()
         else:
             recorder = voice.Recorder()
             if not recorder.start():
@@ -316,23 +458,25 @@ class Bridge:
                       "missing dependencies -- see docs/customization.md)", flush=True)
                 self._stt.close()
                 self._stt = None
-                return
+                return False
 
         self._recorder = recorder
         self._recording = True
-        self.link.write_line(json.dumps({"recording": True}))
+        self._voice_pending_session_key = self._selected_key
+        self._push_mic_led()
         print(f"[macropad-bridge] voice recording started ({trigger}, backend={backend})",
               flush=True)
+        return True
 
     def _stop_voice(self, trigger: str) -> None:
         from . import sessions, voice
 
         self._recording = False
-        self.link.write_line(json.dumps({"recording": False}))
         recorder, self._recorder = self._recorder, None
         stt, self._stt = self._stt, None
         session_key = self._selected_key
         streaming = getattr(stt, "streaming", False) if stt else False
+        auto_enter = self._voice_settings.get("auto_enter", True)
 
         def finish(text: str | None) -> None:
             if streaming:
@@ -340,17 +484,30 @@ class Bridge:
                     remainder = text[self._streamed_chars :]
                     if remainder:
                         sessions.send_to_session(session_key, remainder, send_enter=False)
-                ok = sessions.send_to_session(session_key, "", send_enter=True)
+                got_text = True
             elif text:
-                ok = sessions.send_to_session(session_key, text, send_enter=True)
+                sessions.send_to_session(session_key, text, send_enter=False)
+                got_text = True
             else:
                 print("[macropad-bridge] voice capture produced no usable transcription",
                       flush=True)
+                self._voice_state = "idle"
+                self._push_mic_led()
                 return
+
+            if auto_enter:
+                ok = sessions.send_to_session(session_key, "", send_enter=True)
+                self._voice_state = "idle"
+            else:
+                ok = got_text
+                self._voice_pending_session_key = session_key
+                self._voice_state = "pending_review"
+            self._push_mic_led()
             status = "sent" if ok else "failed (no tmux session running for the selected key?)"
             shown = text or "(streamed)"
+            suffix = "" if auto_enter else " (pending review -- tap mic again to submit)"
             print(f"[macropad-bridge] voice -> session key={session_key} {status}: "
-                  f"\"{shown}\"", flush=True)
+                  f"\"{shown}\"{suffix}", flush=True)
 
         if streaming:
             print(f"[macropad-bridge] voice recording stopped ({trigger}), finalizing stream...",
@@ -409,6 +566,14 @@ class Bridge:
             self._last_sent_model = model
             self.link.write_line(json.dumps({"model": model}))
 
+    def _poll_branch_once(self) -> None:
+        from . import sessions
+
+        branch = sessions.detect_branch(self._selected_key)
+        if branch != self._last_sent_branch:
+            self._last_sent_branch = branch
+            self.link.write_line(json.dumps({"branch": branch}))
+
     def _push_effort_to_oled(self) -> None:
         """Sends the selected session's last-known effort level (see
         _advance_effort's docstring for why this is "last set", not
@@ -421,17 +586,50 @@ class Bridge:
     def _push_encoder_mode(self) -> None:
         self.link.write_line(json.dumps({"encoder_mode": self._encoder_rotation_mode}))
 
+    def _voice_key(self) -> int | None:
+        """Which action key (if any) has `type: voice_toggle` in
+        config/keymap.yaml -- the firmware needs to know this so it can
+        track press/release timing for that key instead of firing the
+        normal one-shot {"action": N} on press (see firmware/code.py's
+        _poll_keys). Only the first match is used if more than one key
+        is (unusually) configured this way."""
+        actions = config.load_keymap().get("actions") or {}
+        for key, entry in actions.items():
+            if (entry or {}).get("type") == "voice_toggle":
+                try:
+                    return int(key)
+                except (TypeError, ValueError):
+                    continue
+        return None
+
+    def _push_voice_key(self) -> None:
+        self.link.write_line(json.dumps({"voice_key": self._voice_key()}))
+
+    def _push_mic_led(self) -> None:
+        led_state = {
+            "idle": "idle",
+            "recording_undecided": "recording",
+            "recording_toggle_armed": "recording",
+            "pending_review": "pending_review",
+        }.get(self._voice_state, "idle")
+        self.link.write_line(json.dumps({"mic_led": led_state}))
+
     def _model_loop(self) -> None:
         while not self._model_stop.is_set():
             try:
                 self._poll_model_once()
-                # Piggyback the selected-session label, effort level, and
-                # encoder mode on this same loop -- cheap, and self-heals
-                # the one-shot pushes in serve_forever()/_on_board_line()
-                # if they raced the serial connection still (re)connecting.
+                self._poll_branch_once()
+                # Piggyback the selected-session label, effort level,
+                # encoder mode, and mic key/LED on this same loop --
+                # cheap, and self-heals the one-shot pushes in
+                # serve_forever()/_on_board_line() if they raced the
+                # serial connection still (re)connecting.
                 self._send_selected_label()
                 self._push_effort_to_oled()
                 self._push_encoder_mode()
+                self._push_voice_key()
+                self._push_mic_led()
+                self._resync_session_leds()  # catches any key dropped by a startup serial race
                 from . import sessions
 
                 sessions.sync_follow_session(self._selected_key)
@@ -490,10 +688,53 @@ class Bridge:
         print(f"[macropad-bridge] usage display enabled (source={source}, "
               f"every {interval}s)", flush=True)
 
+    def _resync_session_leds(self, force: bool = False) -> None:
+        """Makes every session key's (0-5) LED match reality: `waiting`
+        for a key with a live tmux session, `idle` for a key that's
+        unconfigured or whose session isn't running. This matters
+        because the MacroPad's NeoPixels have no memory of their own on
+        the *host* side -- they hold whatever color they were last told
+        until the board itself reboots (a serial reconnect / bridge
+        restart does NOT reset them, only the physical firmware does).
+        Without this, a key can be stuck showing a stale color from
+        hours/days ago (e.g. leftover test traffic, or a session that
+        was since removed from keymap.yaml) with nothing to ever clear
+        it -- see docs/customization.md's "Resyncing LEDs" section.
+
+        Called on bridge startup (and self-healed via the model-poll
+        loop for anything a startup serial race dropped) with
+        force=False, which only touches keys not yet tracked in
+        self._key_states, so it never regresses a real hook-reported
+        state back to a generic `waiting`/`idle`. Called with force=True
+        by the `type: resync` action key (see _dispatch_action) for an
+        on-demand full resync -- that path deliberately re-pushes every
+        key regardless of tracked state, since the whole point of a
+        manual resync button is "make it match reality right now",
+        overriding anything stale."""
+        from . import sessions
+
+        keys = config.load_keymap().get("keys") or {}
+        for key in range(sessions.SESSION_KEY_COUNT):
+            if not force and key in self._key_states:
+                continue
+            entry = keys.get(key) or keys.get(str(key))
+            has_project = bool((entry or {}).get("project_path"))
+            state = "waiting" if (has_project and sessions.has_session(key)) else "idle"
+            # Only record it once the write actually lands -- if the
+            # serial link isn't connected yet (a startup race), leave it
+            # untracked (force=False path) so the next model-poll cycle
+            # retries this same key instead of silently giving up on it.
+            if self._push_key_state(key, state) or force:
+                self._key_states[key] = state
+
     def serve_forever(self) -> None:
         print(f"[macropad-bridge] listening on {self.host}:{self.port}", flush=True)
         self._send_selected_label()  # push key 0's label immediately, don't wait for a rotation
+        self._poll_branch_once()
         self._push_encoder_mode()
+        self._push_voice_key()
+        self._push_mic_led()
+        self._resync_session_leds()
         from . import sessions
 
         sessions.sync_follow_session(self._selected_key)

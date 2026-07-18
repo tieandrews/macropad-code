@@ -31,7 +31,7 @@ SERVICES_DIR = REPO_ROOT / "macropad" / "services"
 CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
 CODEX_CONFIG_PATH = Path.home() / ".codex" / "config.toml"
 
-CLAUDE_HOOK_EVENTS = ["UserPromptSubmit", "Notification", "Stop", "SubagentStop"]
+CLAUDE_HOOK_EVENTS = ["UserPromptSubmit", "PreToolUse", "Notification", "Stop", "SubagentStop"]
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +109,8 @@ def configure_claude() -> None:
         entries.append({"matcher": "", "hooks": [{"type": "command", "command": command}]})
 
     CLAUDE_SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n")
-    print(f"  wired UserPromptSubmit / Notification / Stop / SubagentStop hooks "
-          f"into {CLAUDE_SETTINGS_PATH}")
+    print(f"  wired UserPromptSubmit / PreToolUse / Notification / Stop / SubagentStop "
+          f"hooks into {CLAUDE_SETTINGS_PATH}")
 
 
 # ---------------------------------------------------------------------------

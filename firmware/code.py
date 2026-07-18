@@ -10,8 +10,12 @@
 #          {"model": "Sonnet 4.5"}                           -> update the OLED
 #          {"effort": "high"}                                -> update the OLED
 #          {"label": "emexams-website"}                      -> update the OLED
-#          {"recording": true}                               -> update the OLED
+#          {"branch": "main"}                                -> update the OLED
 #          {"encoder_mode": "session" | "effort"}            -> set what rotation does
+#          {"voice_key": 8}                                   -> which action key (if any)
+#                                                                 is the mic control, or null
+#          {"mic_led": "idle"|"recording"|"pending_review"}  -> mic key's LED state, and
+#                                                                 the "*MIC*" marker on line 5
 #
 #   2. Render the usage message on the built-in OLED as a compact
 #      two-line dashboard: one line per metric, each "<label> <bar> <pct>%".
@@ -21,10 +25,12 @@
 #      shown together as "Sonnet 4.5 - high"). A fourth line shows the
 #      selected session's project label (from a {"label": ...} message),
 #      so you can see which repo the knob is currently pointed at. A
-#      fifth, bottom line is a compact status bar -- currently just
-#      "MIC: off"/"MIC: REC" (from {"recording": true/false}), on its own
-#      line so starting/stopping voice input is unambiguous without
-#      touching the model name meanwhile.
+#      fifth, bottom line shows that session's current git branch (from
+#      a {"branch": ...} message), with a "*MIC*" marker prefixed onto
+#      it while voice recording is active or a transcript is pending
+#      review (from {"mic_led": ...} -- see _render_branch_line()). The
+#      marker disappears once the mic goes idle, so the line spends most
+#      of its time just showing the branch.
 #
 #   4. Keys 0-5 (top two rows) are "session" keys -- their LEDs track agent
 #      state as before. Two effects, layered independently so they never
@@ -57,10 +63,19 @@
 #      local HID macros via KEY_ACTIONS below, which takes priority over
 #      forwarding to the host.
 #
-#   6. Pressing the encoder itself sends {"encoder_press": true} to the
-#      host, which toggles voice-to-text capture on/off -- see
-#      macropad/voice.py. The board has no microphone of its own; it's
-#      purely a remote trigger for the host's recording.
+#   6. The encoder's push-button, and whichever action key (if any) has
+#      `type: voice_toggle` in config/keymap.yaml (announced by the host
+#      as {"voice_key": N}), both drive voice recording the same way:
+#      press sends {"voice_press": true, "source": "encoder"|"key"} and
+#      always starts recording immediately (no perceptible delay either
+#      way). Release sends {"voice_release": true, "source": ...,
+#      "held_ms": N}; the *host* decides from held_ms whether that was a
+#      hold-to-talk (stop now) or a quick tap (keep recording, arm
+#      toggle-off on the next press) -- see macropad/bridge.py's voice
+#      state machine and docs/customization.md. The board has no
+#      microphone of its own; it's purely a remote trigger for the
+#      host's recording, and doesn't need to know which interpretation
+#      applies.
 #
 # Copy this file to CIRCUITPY/code.py alongside boot.py. See
 # docs/hardware-setup.md for the full flashing walkthrough.
@@ -145,12 +160,12 @@ for _i in range(2):
 # Third line: selected session's model name -- see _apply_model_message()
 # below. Fourth line: the selected session's project label (which repo
 # the knob is pointed at) -- see _apply_label_message() below. Fifth
-# line: a compact bottom status bar, currently just the mic/voice-input
-# state -- see _apply_recording_message() below. Kept on its own
-# always-visible line rather than overlaying the model line, so pressing
-# the encoder to start/stop recording is unambiguous without losing the
-# model name meanwhile. Deliberately terse ("MIC: ...") to leave room to
-# append more short fields to this same line later.
+# line: the selected session's current git branch, with a "*MIC*" marker
+# prefixed onto it while voice recording is active/pending review --
+# see _render_branch_line() below. The label is often too long to share
+# a line with the branch name without running off the 128px-wide
+# display, so the branch gets its own line rather than being appended to
+# the label line.
 _status_line = label.Label(
     terminalio.FONT,
     text="",
@@ -169,14 +184,14 @@ _label_line = label.Label(
 )
 _display_group.append(_label_line)
 
-_bottom_line = label.Label(
+_branch_line = label.Label(
     terminalio.FONT,
     text="",
     color=0xFFFFFF,
     x=2,
     y=6 + 4 * LINE_HEIGHT,
 )
-_display_group.append(_bottom_line)
+_display_group.append(_branch_line)
 
 
 _current_model = ""
@@ -207,21 +222,31 @@ def _apply_effort_message(effort_level) -> None:
     _render_status_line()
 
 
-def _apply_recording_message(is_recording: bool) -> None:
-    # The MacroPad's OLED is monochrome -- displayio auto-converts any
-    # color to plain black/white by luminance, so a "dim grey"/"dark
-    # red" here (as originally tried) doesn't render as a dimmer or
-    # differently-hued white, it just falls below the threshold and
-    # renders as invisible black text. Always use full white and let
-    # the text itself (not color) carry the on/off distinction.
-    _bottom_line.text = "MIC: REC" if is_recording else "MIC: off"
-
-
 def _apply_label_message(project_label) -> None:
     _label_line.text = project_label or ""
 
 
-_apply_recording_message(False)  # show "MIC: off" from boot, not blank
+_current_branch = ""
+
+
+def _render_branch_line() -> None:
+    # "*MIC*" is prefixed onto the branch line while recording or
+    # awaiting a pending-review confirm tap (see _mic_led_state below,
+    # set from the host's {"mic_led": ...} messages) -- both states
+    # share the same marker; the mic key's own LED color (blue vs amber)
+    # is what actually distinguishes recording from pending-review, this
+    # line just needs to say "something mic-related is happening".
+    # Monochrome OLED (see the color-vs-luminance note in
+    # _apply_led_message/firmware history) -- text presence/absence
+    # carries the signal, not color, same reasoning as the old MIC line.
+    mic_marker = "*MIC* " if _mic_led_state in ("recording", "pending_review") else ""
+    _branch_line.text = mic_marker + _current_branch
+
+
+def _apply_branch_message(branch_name) -> None:
+    global _current_branch
+    _current_branch = branch_name or ""
+    _render_branch_line()
 
 
 def _render_bar(pct) -> str:
@@ -306,6 +331,36 @@ def _apply_encoder_mode_message(mode) -> None:
         _encoder_mode = mode
 
 
+# --- mic key/LED (voice_toggle action key) ------------------------------
+#
+# The board doesn't know which key (if any) is `type: voice_toggle` --
+# the host announces it via {"voice_key": N} (or null for none) so
+# _poll_keys() knows to track press/release for that key instead of
+# firing the normal one-shot {"action": N} on press. Independent of
+# _key_colors -- the mic key's LED is host-driven status (idle/
+# recording/pending_review), not the per-status color grid other action
+# keys use, so it's rendered as an override in _render_key_leds() rather
+# than going through _apply_led_message().
+_voice_key = None
+_mic_led_state = "idle"  # "idle" | "recording" | "pending_review"
+
+_MIC_IDLE_COLOR = (0, 0, 40)  # very dim blue -- marks the key as "special" even at rest
+_MIC_RECORDING_COLOR = (40, 40, 255)  # bright blue -- actively capturing audio
+_MIC_PENDING_REVIEW_COLOR = (255, 140, 0)  # amber -- transcript sitting in the pane, needs a confirm tap
+
+
+def _apply_voice_key_message(key) -> None:
+    global _voice_key
+    _voice_key = key if isinstance(key, int) and ACTION_KEY_START <= key < 12 else None
+
+
+def _apply_mic_led_message(state) -> None:
+    global _mic_led_state
+    if state in ("idle", "recording", "pending_review"):
+        _mic_led_state = state
+        _render_branch_line()  # the "*MIC*" marker on line 5 tracks this too
+
+
 _PULSE_PERIOD_SECONDS = 1.6
 _PULSE_MIN_SCALE = 0.35  # how dim a pulsing key's breath dips to
 # Selection contrast comes from both ends at once -- the selected key is
@@ -357,14 +412,35 @@ def _render_key_leds() -> None:
                     else _SELECTED_FLOOR_COLOR
             else:
                 color = _scale_color(color, _UNSELECTED_DIM_SCALE)
+        if key == _voice_key:
+            # Overrides whatever status color that key would otherwise
+            # show -- the mic key's LED is host-driven recording state,
+            # not a per-key status color, so it always wins here.
+            if _mic_led_state == "recording":
+                color = _scale_color(_MIC_RECORDING_COLOR, pulse_scale)
+            elif _mic_led_state == "pending_review":
+                color = _MIC_PENDING_REVIEW_COLOR
+            else:
+                color = _MIC_IDLE_COLOR
         macropad.pixels[key] = color
     macropad.pixels.show()
 
 
+_encoder_press_started_at = None
+
+
 def _poll_encoder_switch() -> None:
+    global _encoder_press_started_at
     macropad.encoder_switch_debounced.update()
     if macropad.encoder_switch_debounced.pressed:
-        _send_line({"encoder_press": True})
+        _encoder_press_started_at = time.monotonic()
+        _send_line({"voice_press": True, "source": "encoder"})
+    elif macropad.encoder_switch_debounced.released:
+        held_ms = 0
+        if _encoder_press_started_at is not None:
+            held_ms = round((time.monotonic() - _encoder_press_started_at) * 1000)
+        _encoder_press_started_at = None
+        _send_line({"voice_release": True, "source": "encoder", "held_ms": held_ms})
 
 
 # --- serial dispatch ------------------------------------------------------
@@ -392,11 +468,17 @@ def _handle_message(raw_line: bytes) -> None:
     if "encoder_mode" in msg:
         _apply_encoder_mode_message(msg["encoder_mode"])
         return
+    if "voice_key" in msg:
+        _apply_voice_key_message(msg["voice_key"])
+        return
+    if "mic_led" in msg:
+        _apply_mic_led_message(msg["mic_led"])
+        return
     if "label" in msg:
         _apply_label_message(msg["label"])
         return
-    if "recording" in msg:
-        _apply_recording_message(msg["recording"])
+    if "branch" in msg:
+        _apply_branch_message(msg["branch"])
         return
     _apply_led_message(msg)
 
@@ -412,12 +494,33 @@ def _poll_serial() -> None:
             _handle_message(line)
 
 
+_key_press_started_at = {}  # key_number -> time.monotonic() at press, for the voice key only
+
+
 def _poll_keys() -> None:
     global _selected_key
     event = macropad.keys.events.get()
-    if not event or not event.pressed:
+    if not event:
         return
     key = event.key_number
+
+    if key == _voice_key:
+        # The voice key reports press/release timing instead of the
+        # normal one-shot {"action": N} on press -- see the module
+        # docstring's job 6 and macropad/bridge.py's voice state machine.
+        if event.pressed:
+            _key_press_started_at[key] = time.monotonic()
+            _send_line({"voice_press": True, "source": "key", "key": key})
+        elif event.released:
+            held_ms = 0
+            started = _key_press_started_at.pop(key, None)
+            if started is not None:
+                held_ms = round((time.monotonic() - started) * 1000)
+            _send_line({"voice_release": True, "source": "key", "key": key, "held_ms": held_ms})
+        return
+
+    if not event.pressed:
+        return
     action = KEY_ACTIONS.get(key)
     if action is not None:
         action()

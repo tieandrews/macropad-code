@@ -39,6 +39,15 @@ class RealtimeWebSocketBackend:
         self._on_completed: Optional[TranscriptCallback] = None
         self._final_transcript = ""
         self._pending_chunks: list[bytes] = []
+        # Set by close()/stop() if they're called while start()'s
+        # WebSocket handshake (a real network round-trip) is still in
+        # flight on another thread -- see bridge.py's _start_voice,
+        # which now starts the mic recording before this connects, so a
+        # very quick tap-to-toggle press/release can plausibly call
+        # stop() before start() has returned. Without this, start()
+        # would finish connecting *after* stop() already ran, leaving
+        # an orphaned, never-closed WebSocket that nothing cleans up.
+        self._closing = False
 
     def start(
         self,
@@ -56,27 +65,44 @@ class RealtimeWebSocketBackend:
             return False
 
         try:
-            self._ws = websocket.create_connection(
+            ws = websocket.create_connection(
                 self._url, header=self._headers, timeout=15
             )
         except Exception as exc:
             print(f"[macropad-stt] WebSocket connect failed: {exc}", flush=True)
             return False
 
+        if self._closing:
+            # stop()/close() ran while we were connecting -- this
+            # session is already over, don't hand off a live connection
+            # nobody will ever close.
+            try:
+                ws.close()
+            except Exception:
+                pass
+            return False
+
         try:
-            self._ws.send(json.dumps(self._session_update))
+            ws.send(json.dumps(self._session_update))
         except Exception as exc:
             print(f"[macropad-stt] session.update failed: {exc}", flush=True)
-            self.close()
+            try:
+                ws.close()
+            except Exception:
+                pass
             return False
+
+        with self._lock:
+            self._ws = ws
 
         self._stop_recv.clear()
         self._recv_thread = threading.Thread(target=self._recv_loop, daemon=True)
         self._recv_thread.start()
 
-        for chunk in self._pending_chunks:
-            self._append_pcm(chunk)
-        self._pending_chunks = []
+        with self._lock:
+            for chunk in self._pending_chunks:
+                self._append_pcm(chunk)
+            self._pending_chunks = []
         return True
 
     def feed_audio(self, audio: np.ndarray) -> None:
@@ -136,6 +162,18 @@ class RealtimeWebSocketBackend:
             self.close()
 
     def stop(self) -> Optional[str]:
+        self._closing = True
+        # start()'s WebSocket handshake now runs concurrently with mic
+        # recording (see bridge.py's _start_voice) so a very fast
+        # tap-to-toggle press/release can call stop() before start() has
+        # actually connected. Give it a brief bounded window to land --
+        # any pending_chunks captured so far are real audio worth
+        # keeping, not worth silently discarding just because the
+        # network round-trip hadn't finished yet.
+        deadline = time.time() + self._commit_wait_seconds
+        while time.time() < deadline and self._ws is None and self._pending_chunks:
+            time.sleep(0.05)
+
         with self._lock:
             if self._ws is not None:
                 try:
@@ -149,6 +187,7 @@ class RealtimeWebSocketBackend:
         return self._final_transcript or None
 
     def close(self) -> None:
+        self._closing = True
         self._stop_recv.set()
         with self._lock:
             ws = self._ws

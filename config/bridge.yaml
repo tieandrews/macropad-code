@@ -17,15 +17,30 @@ serial:
   baudrate: 115200
   # Seconds between reconnect attempts when the MacroPad is unplugged,
   # asleep, or not yet found.
-  retry_seconds: 2.0
+  retry_seconds: 2
 
-# Voice input: toggle recording from the encoder and/or an action key
-# (type: voice_toggle in config/keymap.yaml). Press once to start,
-# again to stop; transcribed text goes into the selected session.
+# Voice input: press-and-hold the encoder (or an action key with
+# type: voice_toggle in config/keymap.yaml) to record, release to stop
+# and transcribe -- classic hold-to-talk. A quick tap (release before
+# hold_threshold_ms) instead leaves it recording hands-free; tap again
+# to stop. Either way, transcribed text goes into the selected session.
 # See macropad/stt/ and docs/customization.md. API keys go in .env
 # (copy from .env.example).
 voice:
   enabled: true
+
+  # Below this held-down duration (ms), a press+release counts as a
+  # "tap" (recording keeps going hands-free until a later tap stops it)
+  # rather than hold-to-talk (release stops it immediately).
+  hold_threshold_ms: 300
+
+  # true (default): recording stop always sends Enter right away, same
+  # as before -- transcript is submitted immediately.
+  # false: recording stop types the transcript WITHOUT Enter, so you can
+  # review/edit it in the session's own input box first; tap the mic
+  # control again (encoder or voice_toggle key) to submit it. The mic
+  # key's LED (if configured) turns amber while a transcript is pending.
+  auto_enter: true
 
   # Backend (pick one):
   #   local_whisper       offline faster-whisper (slow on CPU, no API key)
@@ -34,7 +49,7 @@ voice:
   #   openai_realtime     OpenAI gpt-realtime-whisper streaming deltas
   #   together_whisper    Together openai/whisper-large-v3 batch
   #   together_realtime   Together realtime WebSocket streaming
-  backend: local_whisper
+  backend: openai_realtime
 
   # local_whisper only -- tiny | base | small | medium | large-v3
   whisper_model: base
@@ -72,7 +87,7 @@ voice:
 # Effort levels cycled through can be overridden with `effort_levels:`
 # (defaults to [low, medium, high, max]).
 encoder:
-  rotation_mode: session
+  rotation_mode: effort
   # effort_levels: [low, medium, high, max]
 
 # How often (seconds) the bridge re-checks the selected session's tmux

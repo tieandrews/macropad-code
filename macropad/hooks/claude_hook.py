@@ -2,11 +2,22 @@
 """Claude Code hook entry point.
 
 Wired into ~/.claude/settings.json by `macropad-setup` for the
-UserPromptSubmit, Notification, Stop, and SubagentStop events. Claude Code
-invokes this once per matching event and pipes a JSON payload to stdin,
-documented at https://code.claude.com/docs/en/hooks -- the fields we care
-about are `hook_event_name`, `cwd`, and (for Notification)
-`notification_type`.
+UserPromptSubmit, PreToolUse, Notification, Stop, and SubagentStop
+events. Claude Code invokes this once per matching event and pipes a
+JSON payload to stdin, documented at
+https://code.claude.com/docs/en/hooks -- the fields we care about are
+`hook_event_name`, `cwd`, and (for Notification) `notification_type`.
+
+PreToolUse -> `working` exists specifically to clear a `permission`
+(red, pulsing) LED once you've approved the prompt and Claude actually
+resumes -- without it, nothing tells the bridge "work resumed" until
+the turn fully ends (`Stop`) or you type a brand new message
+(`UserPromptSubmit`), so the LED would otherwise stay stuck on
+`permission` for the rest of the turn even though the agent is happily
+working again. It also fires on every other tool call during a turn,
+not just ones following an approval -- harmless (just re-sends the
+same `working` color each time), and correct either way, since a tool
+running IS the agent working.
 
 Never raises and always exits 0: a lit LED is a nice-to-have, not
 something that should ever interrupt, block, or slow down an agent turn.
@@ -32,6 +43,7 @@ NOTIFICATION_STATES = {
 
 EVENT_STATES = {
     "UserPromptSubmit": "working",
+    "PreToolUse": "working",
     "Stop": "done",
     "SubagentStop": "done",
 }

@@ -24,10 +24,12 @@ keys:
     label: macropad-code
     agent: claude
     project_path: /home/tieandrews/wsl-projects/personal/macropad-code
+    permission_mode: bypassPermissions
   1:
     label: emexams-remix
     agent: claude
     project_path: /home/tieandrews/wsl-projects/personal/emexams-remix
+    permission_mode: auto
   2:
     label: emexams-website
     agent: claude
@@ -71,8 +73,13 @@ keys:
 #     `/effort <level>` into the selected session. Same rotation logic
 #     also drives config/bridge.yaml's `encoder.rotation_mode: effort`.
 #
-#   type: voice_toggle -- start/stop voice recording (same as encoder
-#     press). Configure backend in config/bridge.yaml and .env.
+#   type: voice_toggle -- press-and-hold to record, release to stop
+#     (hold-to-talk), or a quick tap to keep recording hands-free until
+#     a later tap stops it -- same gesture as the encoder press. This
+#     key's LED shows mic state independent of any other status color:
+#     dim blue idle, bright blue while recording, amber if a transcript
+#     is pending review (see config/bridge.yaml's voice.auto_enter).
+#     Configure backend/timing in config/bridge.yaml and .env.
 #
 # Left commented out by default -- nothing fires into a live agent
 # session until you explicitly configure it. Some starting ideas:
@@ -98,6 +105,7 @@ keys:
 #   11:
 #     label: New chat
 #     send_keys: "/clear"
+    permission_mode: bypassPermissions
 actions:
   6:
     label: Approve
@@ -106,28 +114,19 @@ actions:
     label: Deny
     send_keys: "n"
   8:
-    label: Mic toggle
-    type: voice_toggle
+    label: Resync
+    type: resync
   9:
-    label: Usage
-    send_keys: "/usage"
-  10:
-    label: Switch model
+    label: Change Model
     type: cycle_model
-    models: [sonnet, opus, haiku]
+    models:
+      - sonnet
+      - opus
+      - haiku
+  10:
+    label: Clear Session
+    send_keys: /clear
+    enter: true
   11:
-    label: New chat
-    send_keys: "/clear"
-
-# By default the encoder's rotation cycles the selected session key
-# (0-5); its OLED third line shows the selected session's current model
-# and effort level (auto-detected/tracked -- see macropad/sessions.py's
-# detect_model()). Setting config/bridge.yaml's `encoder.rotation_mode:
-# effort` repurposes rotation to cycle effort instead -- see the
-# cycle_effort docs above and docs/customization.md.
-#
-# Pressing the encoder toggles voice-to-text: press once to start
-# recording from this machine's microphone, press again to stop,
-# transcribe, and send the result into the selected session as if you'd
-# typed it. Off by default -- see `voice:` in config/bridge.yaml and
-# docs/customization.md to turn it on.
+    label: Mic Toggle
+    type: voice_toggle

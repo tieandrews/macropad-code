@@ -19,11 +19,11 @@
 # hook events.
 # =============================================================================
 
-brightness: 0.5
+brightness: 0.25
 
 states:
   idle:
-    color: [0, 20, 0]  # dim green
+    color: [217, 238, 242] # dim green
     description: No active agent session assigned to this key.
 
   working:
