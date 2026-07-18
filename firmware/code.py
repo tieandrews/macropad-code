@@ -8,20 +8,23 @@
 #          {"key": 3, "color": [255, 0, 0], "pulse": false}  -> set a key's LED
 #          {"usage": {"session": {...}, "weekly": {...}}}   -> update the OLED
 #          {"model": "Sonnet 4.5"}                           -> update the OLED
+#          {"effort": "high"}                                -> update the OLED
 #          {"label": "emexams-website"}                      -> update the OLED
 #          {"recording": true}                               -> update the OLED
+#          {"encoder_mode": "session" | "effort"}            -> set what rotation does
 #
 #   2. Render the usage message on the built-in OLED as a compact
 #      two-line dashboard: one line per metric, each "<label> <bar> <pct>%".
 #
-#   3. Render a third status line: the selected session's model name
-#      (from a {"model": ...} message). A fourth line shows the selected
-#      session's project label (from a {"label": ...} message), so you
-#      can see which repo the knob is currently pointed at. A fifth,
-#      bottom line is a compact status bar -- currently just "MIC: off"/
-#      "MIC: REC" (from {"recording": true/false}), on its own line so
-#      starting/stopping voice input is unambiguous without touching the
-#      model name meanwhile.
+#   3. Render a third status line: the selected session's model name and
+#      effort level (from {"model": ...} / {"effort": ...} messages,
+#      shown together as "Sonnet 4.5 - high"). A fourth line shows the
+#      selected session's project label (from a {"label": ...} message),
+#      so you can see which repo the knob is currently pointed at. A
+#      fifth, bottom line is a compact status bar -- currently just
+#      "MIC: off"/"MIC: REC" (from {"recording": true/false}), on its own
+#      line so starting/stopping voice input is unambiguous without
+#      touching the model name meanwhile.
 #
 #   4. Keys 0-5 (top two rows) are "session" keys -- their LEDs track agent
 #      state as before. Two effects, layered independently so they never
@@ -41,7 +44,11 @@
 #          e.g. spot a key showing an error color and just press it,
 #          rather than dialing the encoder all the way around.
 #      Selection changes (from either the encoder or a session-key press)
-#      are sent to the host as {"selected": N}.
+#      are sent to the host as {"selected": N}. By default rotation always
+#      does this; if the host has set {"encoder_mode": "effort"}, rotation
+#      instead sends {"encoder_delta": N} and does *not* change selection
+#      -- see config/bridge.yaml's `encoder.rotation_mode`. Session keys
+#      still jump selection directly by pressing them, in either mode.
 #
 #   5. Keys 6-11 (bottom two rows) are "action" keys. Pressing one sends
 #      {"action": N} to the host, which routes it (via tmux) into whatever
@@ -172,8 +179,32 @@ _bottom_line = label.Label(
 _display_group.append(_bottom_line)
 
 
+_current_model = ""
+_current_effort = ""
+
+
+def _render_status_line() -> None:
+    # Effort is appended to the same line as the model name (rather than
+    # a new line) since the OLED's 5 lines are already fully used --
+    # usage x2, model/effort, project label, mic status.
+    # terminalio.FONT only covers ASCII (see BAR_WIDTH comment above), so
+    # use a plain hyphen rather than a middle-dot separator.
+    if _current_model and _current_effort:
+        _status_line.text = f"{_current_model} - {_current_effort}"
+    else:
+        _status_line.text = _current_model or _current_effort
+
+
 def _apply_model_message(model_name) -> None:
-    _status_line.text = model_name or ""
+    global _current_model
+    _current_model = model_name or ""
+    _render_status_line()
+
+
+def _apply_effort_message(effort_level) -> None:
+    global _current_effort
+    _current_effort = effort_level or ""
+    _render_status_line()
 
 
 def _apply_recording_message(is_recording: bool) -> None:
@@ -260,6 +291,21 @@ def _apply_led_message(msg: dict) -> None:
 _selected_key = 0
 _encoder_last = macropad.encoder
 
+# "session" (default): rotation cycles _selected_key, as always.
+# "effort": rotation instead sends {"encoder_delta": N} to the host,
+# which cycles the *selected* session's Claude Code effort level -- see
+# config/bridge.yaml's encoder.rotation_mode. Set by the host on connect
+# (and periodically re-sent -- see bridge.py's _model_loop), not a local
+# board setting, since the board has no config file of its own.
+_encoder_mode = "session"
+
+
+def _apply_encoder_mode_message(mode) -> None:
+    global _encoder_mode
+    if mode in ("session", "effort"):
+        _encoder_mode = mode
+
+
 _PULSE_PERIOD_SECONDS = 1.6
 _PULSE_MIN_SCALE = 0.35  # how dim a pulsing key's breath dips to
 # Selection contrast comes from both ends at once -- the selected key is
@@ -284,6 +330,9 @@ def _poll_encoder() -> None:
     if delta == 0:
         return
     _encoder_last = pos
+    if _encoder_mode == "effort":
+        _send_line({"encoder_delta": delta})
+        return
     _selected_key = (_selected_key + delta) % SESSION_KEY_COUNT
     _send_line({"selected": _selected_key})
 
@@ -336,6 +385,12 @@ def _handle_message(raw_line: bytes) -> None:
         return
     if "model" in msg:
         _apply_model_message(msg["model"])
+        return
+    if "effort" in msg:
+        _apply_effort_message(msg["effort"])
+        return
+    if "encoder_mode" in msg:
+        _apply_encoder_mode_message(msg["encoder_mode"])
         return
     if "label" in msg:
         _apply_label_message(msg["label"])

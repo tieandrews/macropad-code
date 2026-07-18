@@ -154,13 +154,18 @@ def start_all() -> None:
 def send_to_session(key: int, text: str, send_enter: bool = True) -> bool:
     """Best-effort: injects `text` into the tmux session for `key`.
     Returns False (never raises) if that session isn't running, tmux
-    isn't available, or `text` is empty -- callers treat this the same as
-    any other "nothing configured/running yet" no-op."""
-    if not text or not (0 <= key < SESSION_KEY_COUNT):
+    isn't available, or both `text` is empty and `send_enter` is False --
+    callers treat this the same as any other "nothing configured/running yet"
+    no-op."""
+    if not (0 <= key < SESSION_KEY_COUNT):
+        return False
+    if not text and not send_enter:
         return False
     if not has_session(key):
         return False
-    args = ["send-keys", "-t", session_name(key), text]
+    args = ["send-keys", "-t", session_name(key)]
+    if text:
+        args.append(text)
     if send_enter:
         args.append("Enter")
     result = _tmux(*args)

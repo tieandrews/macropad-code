@@ -19,16 +19,61 @@ serial:
   # asleep, or not yet found.
   retry_seconds: 2.0
 
-# Voice input: press the rotary encoder to start recording from this
-# machine's default microphone, press again to stop, transcribe locally,
-# and send the result into the currently selected session's tmux pane.
-# See macropad/voice.py and docs/customization.md before enabling --
-# needs `uv sync --extra voice` and a reachable microphone.
+# Voice input: toggle recording from the encoder and/or an action key
+# (type: voice_toggle in config/keymap.yaml). Press once to start,
+# again to stop; transcribed text goes into the selected session.
+# See macropad/stt/ and docs/customization.md. API keys go in .env
+# (copy from .env.example).
 voice:
   enabled: true
-  # tiny | base | small | medium | large-v3 -- bigger is more accurate
-  # and much slower on CPU. Downloaded once and cached on first use.
+
+  # Backend (pick one):
+  #   local_whisper       offline faster-whisper (slow on CPU, no API key)
+  #   openai_whisper      OpenAI whisper-1 batch (~$0.006/min)
+  #   openai_gpt4o_mini   OpenAI gpt-4o-mini-transcribe batch (~$0.003/min)
+  #   openai_realtime     OpenAI gpt-realtime-whisper streaming deltas
+  #   together_whisper    Together openai/whisper-large-v3 batch
+  #   together_realtime   Together realtime WebSocket streaming
+  backend: local_whisper
+
+  # local_whisper only -- tiny | base | small | medium | large-v3
   whisper_model: base
+
+  openai:
+    api_key_env: OPENAI_API_KEY
+    # Batch models: whisper-1 | gpt-4o-mini-transcribe | gpt-4o-transcribe
+    model: gpt-4o-mini-transcribe
+    # Realtime streaming model (backend: openai_realtime)
+    realtime_model: gpt-realtime-whisper
+    # Latency vs accuracy for gpt-realtime-whisper:
+    # minimal | low | medium | high | xhigh
+    delay: medium
+    language: en
+
+  together:
+    api_key_env: TOGETHER_API_KEY
+    model: openai/whisper-large-v3
+    language: en
+
+  triggers:
+    encoder: true   # rotary knob press toggles mic
+    # Action keys use type: voice_toggle in keymap.yaml (see key 8)
+
+# Rotary encoder rotation mode -- what turning the knob does. The
+# encoder's *press* is configured above (voice.triggers.encoder) and via
+# type: voice_toggle action keys; this controls what *rotating* it does.
+#   session   (default) cycles which of keys 0-5 is the selected session,
+#             same as always.
+#   effort    rotation instead cycles the *selected* session's Claude
+#             Code effort level (sends `/effort <level>`, same mechanism
+#             as a cycle_effort action key -- see keymap.yaml). Keys 0-5
+#             still pick which session is selected by pressing them
+#             directly; only rotation is repurposed.
+# Effort levels cycled through can be overridden with `effort_levels:`
+# (defaults to [low, medium, high, max]).
+encoder:
+  rotation_mode: session
+  # effort_levels: [low, medium, high, max]
 
 # How often (seconds) the bridge re-checks the selected session's tmux
 # pane for which Claude Code model it's using, to show on the OLED's

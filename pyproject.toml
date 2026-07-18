@@ -20,18 +20,33 @@ pty = ["pyte>=0.8.1"]
 # the system-level PortAudio library (`sudo apt install libportaudio2` on
 # Debian/Ubuntu/WSL; bundled already on most other platforms). See
 # macropad/voice.py.
-voice = ["sounddevice>=0.4", "numpy>=1.24", "faster-whisper>=1.0"]
+voice = [
+    "sounddevice>=0.4",
+    "numpy>=1.24",
+    "faster-whisper>=1.0",
+    "openai>=1.40",
+    "together>=1.2",
+    "websocket-client>=1.6",
+    "python-dotenv>=1.0",
+]
 # For `macropad-flash` -- pushes firmware/{boot.py,code.py} over the
 # serial REPL instead of copying to the CIRCUITPY mass-storage drive.
 # See macropad/firmware_flash.py and docs/troubleshooting.md ("Updating
 # firmware over WSL/USB") for why this exists.
 firmware = ["adafruit-ampy>=1.1.0"]
+# For `macropad-webui` -- a local web UI for editing config/*.yaml
+# (colors, keymap actions, voice/encoder settings) instead of hand-
+# editing YAML. ruamel.yaml (round-trip mode) is used instead of PyYAML
+# for the files it writes, so comments/formatting survive a save even
+# though config/*.yaml is meant to be human-read too. See macropad/webui.py.
+webui = ["flask>=3.0", "ruamel.yaml>=0.18"]
 
 [project.scripts]
 macropad-setup = "macropad.setup_cli:main"
 macropad-bridge = "macropad.bridge:main"
 macropad-sessions = "macropad.sessions:main"
 macropad-flash = "macropad.firmware_flash:main"
+macropad-webui = "macropad.webui:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -41,4 +56,4 @@ build-backend = "setuptools.build_meta"
 include = ["macropad*"]
 
 [tool.setuptools.package-data]
-macropad = ["services/*.template"]
+macropad = ["services/*.template", "webui_static/*"]

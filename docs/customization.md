@@ -1,6 +1,6 @@
 # Customizing keymap, colors, usage display, and the bridge
 
-All config files live in [`config/`](../config/) and are plain YAML -- edit them in any text editor. `macropad-bridge` re-reads `config/colors.yaml` and `config/keymap.yaml` fresh on every hook event *and* every action-key press (no restart needed -- the very next key-press/state-change picks up your edit). `config/bridge.yaml` (host/port/serial settings) and `config/usage.yaml` are only read once at startup, so **do** restart the bridge after editing those.
+All config files live in [`config/`](../config/) and are plain YAML -- edit them in any text editor, or use `macropad-webui` (see [Web UI](#web-ui-macropad-webui) below) if you'd rather not hand-edit YAML. `macropad-bridge` re-reads `config/colors.yaml` and `config/keymap.yaml` fresh on every hook event *and* every action-key press (no restart needed -- the very next key-press/state-change picks up your edit). `config/bridge.yaml`'s `voice`/`encoder` settings are cached at startup but can be hot-reloaded by sending `{"reload_config": true}` to the bridge's socket (the web UI's "Apply to pad" does this automatically); `host`/`port`/`serial` and `config/usage.yaml` are only read once at startup, so **do** restart the bridge after editing those directly.
 
 ## `config/keymap.yaml` -- session keys, action keys, and the encoder
 
@@ -50,7 +50,9 @@ The OLED's third line shows the selected session's current model (e.g. `Sonnet 4
 
 The fourth line shows the selected session's `label` from `config/keymap.yaml` (e.g. `emexams-website`), so you can always see which repo the knob is pointed at without needing to remember key positions. It updates on the same triggers as the model line (encoder rotation, plus the same poll interval as a self-heal), and is blank for an unconfigured key.
 
-**Pressing the encoder** toggles voice-to-text: press once to start recording from this machine's microphone (the OLED's bottom line switches from `MIC: off` to `MIC: REC`), press again to stop, transcribe locally, and send the transcribed text into the selected session as if you'd typed it. See [Voice input](#voice-input-speak-instead-of-typing) below -- off by default, since it needs an extra dependency and a working microphone.
+**Pressing the encoder** (if `voice.triggers.encoder: true` in `config/bridge.yaml`) toggles voice-to-text -- same as an action key with `type: voice_toggle`. The OLED's bottom line switches from `MIC: off` to `MIC: REC`. See [Voice input](#voice-input-speak-instead-of-typing) below.
+
+**Rotating the encoder** normally cycles session selection, as described above. Setting `encoder.rotation_mode: effort` in `config/bridge.yaml` repurposes rotation instead: each detent cycles the *selected* session's Claude Code effort level, same as a `type: cycle_effort` action key (sending `/effort <level>`). Session keys (0-5) still jump selection directly by pressing them in either mode -- only rotation itself changes meaning. The bridge pushes whichever mode is configured to the board on connect, so switching modes just means editing `bridge.yaml` and letting the bridge reconnect (or restart it).
 
 ### Action keys (6-11) -- `actions:`
 
@@ -75,6 +77,10 @@ actions:
     label: Switch model
     type: cycle_model
     models: [sonnet, opus, haiku]
+  11:
+    label: Cycle effort
+    type: cycle_effort
+    levels: [low, medium, high, max]
 ```
 
 **`send_keys` entries (the default -- `type: send_keys` can be omitted):**
@@ -86,6 +92,16 @@ actions:
 
 - Each press advances to the next name in `models:` (wraps around) and sends `/model <name>` into the selected session -- Claude Code's own command for switching models mid-session. `models:` defaults to `[sonnet, opus, haiku]` if omitted.
 - The bridge tracks each session key's own position in the rotation in memory (reset on bridge restart) -- it doesn't try to read back which model you're *actually* on first, it just advances forward each press. The OLED's model line (above) reflects the real result within a few seconds regardless, so you'll always see the truth even if the rotation's internal pointer and reality briefly disagree (e.g. right after a bridge restart, or if you also ran `/model` by hand).
+
+**`type: cycle_effort` entries:**
+
+- Each press advances to the next name in `levels:` (wraps around) and sends `/effort <level>` into the selected session -- Claude Code's command for setting its extended-thinking effort. `levels:` defaults to `[low, medium, high, max]` if omitted.
+- Unlike model name, there's no reliable way to scrape Claude Code's tmux pane for the *actual* current effort level, so the OLED's effort display (appended to the model line, e.g. `Sonnet 4.5 - high`) only reflects what this bridge itself last sent via a `cycle_effort` press or the encoder (see below) -- it resets to blank on bridge restart, and won't notice if you set effort by typing `/effort` yourself.
+- The same rotation logic can also be driven by turning the encoder instead of pressing a key -- see `config/bridge.yaml`'s `encoder.rotation_mode: effort` below.
+
+**`type: voice_toggle` entries:**
+
+- Start/stop voice recording and transcription into the selected session -- same behavior as pressing the encoder. Configure `voice.backend` and API keys in `config/bridge.yaml` / `.env` (see [Voice input](#voice-input-speak-instead-of-typing)).
 
 Pressing an action key with nothing configured for it, or while no tmux session is running for the currently selected key, is a silent no-op (logged by the bridge, never raised) -- same fire-and-forget philosophy as everywhere else in this repo.
 
@@ -102,26 +118,58 @@ Action keys work by injecting text into a **named tmux session** -- `macropad-ke
 
 ## Voice input: speak instead of typing
 
-Pressing the rotary encoder toggles recording from this machine's default microphone; pressing it again stops recording, transcribes locally with [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (an offline, CPU-friendly Whisper implementation -- no API key, no cloud, nothing leaves your machine), and sends the resulting text into whichever session is currently selected, exactly like an action key would.
+Pressing the rotary encoder (if `voice.triggers.encoder: true`) or an action key with `type: voice_toggle` toggles recording from this machine's default microphone; pressing again stops recording, transcribes, and sends the result into whichever session is currently selected.
 
 **Off by default.** To turn it on:
 
-1. Install the optional dependencies: `uv sync --extra voice` (adds `sounddevice`, `numpy`, `faster-whisper`).
-2. Install two system-level packages `sounddevice` needs at runtime (Debian/Ubuntu/WSL -- other platforms typically bundle equivalents already):
-   ```bash
-   sudo apt install libportaudio2 libasound2-plugins
-   ```
-   `libportaudio2` is the audio I/O library itself; `libasound2-plugins` is the ALSA-to-PulseAudio bridge plugin -- **on WSL specifically, this second one is what actually lets ALSA see WSLg's forwarded microphone at all.** Without it, `sounddevice.query_devices()` returns an empty list even though the mic genuinely works (verify with `pactl list sources short` -- if that shows an `RDPSource` line, your mic is reachable at the PulseAudio level and it's just ALSA that can't see it yet).
-3. Make sure a microphone is actually reachable from wherever the bridge runs: `uv run python -c "import sounddevice as sd; print(sd.query_devices())"` should list a `pulse` device (on WSL) with a non-zero input channel count, and `sd.default.device` shouldn't be `[-1, -1]`. If it's still empty after installing both packages above, check Windows' mic privacy settings (Settings -> Privacy & security -> Microphone -> "Let desktop apps access your microphone"), or restart WSL (`wsl --shutdown` from PowerShell, then reopen your terminal).
-4. Set `voice.enabled: true` in `config/bridge.yaml` (see below) and restart the bridge.
+1. Install dependencies: `uv sync --extra voice`
+2. Install system audio packages (WSL): `sudo apt install libportaudio2 libasound2-plugins`
+3. Copy `.env.example` to `.env` and set API keys for your chosen backend
+4. Set `voice.enabled: true` and `voice.backend:` in `config/bridge.yaml`, restart the bridge
+
+### STT backends (`voice.backend`)
+
+| Backend | Type | API key | Notes |
+|---|---|---|---|
+| `local_whisper` | batch | none | Offline faster-whisper; slow on CPU |
+| `openai_whisper` | batch | `OPENAI_API_KEY` | whisper-1 (~$0.006/min) |
+| `openai_gpt4o_mini` | batch | `OPENAI_API_KEY` | gpt-4o-mini-transcribe (~$0.003/min) |
+| `openai_realtime` | **streaming** | `OPENAI_API_KEY` | gpt-realtime-whisper -- text appears in the session as you speak |
+| `together_whisper` | batch | `TOGETHER_API_KEY` | openai/whisper-large-v3 |
+| `together_realtime` | **streaming** | `TOGETHER_API_KEY` | Together WebSocket realtime |
+
+Streaming backends (`openai_realtime`, `together_realtime`) append transcript **deltas** into the selected tmux session as you speak (no Enter until you press stop). Batch backends wait until you stop, then send the full transcript + Enter.
+
+Example `config/bridge.yaml`:
+
+```yaml
+voice:
+  enabled: true
+  backend: openai_realtime
+  openai:
+    api_key_env: OPENAI_API_KEY
+    realtime_model: gpt-realtime-whisper
+    delay: medium        # minimal | low | medium | high | xhigh
+    language: en
+  triggers:
+    encoder: true
+```
+
+Example action key (`config/keymap.yaml`):
+
+```yaml
+actions:
+  8:
+    label: Mic toggle
+    type: voice_toggle
+```
 
 Notes:
 
-- The first press after a bridge (re)start is slower than the rest, since the Whisper model (a few hundred MB for the default `base` size) is downloaded once and cached under `~/.cache`, then loaded into memory and kept there for the life of the process.
-- `whisper_model` in `config/bridge.yaml` trades accuracy for speed: `tiny` is fastest/least accurate, `base` (default) is a reasonable middle ground, `small`/`medium`/`large-v3` are progressively slower and more accurate on CPU.
-- Every step degrades cleanly rather than crashing the bridge: no microphone, missing dependencies, a failed transcription, or empty audio all just log a message and no-op -- same fire-and-forget philosophy as everything else in this repo. See `macropad/voice.py`.
-- This is a toggle, not push-to-talk -- press once to start, speak, press again when you're done. The OLED's bottom line shows `MIC: REC` the whole time so it's obvious the pad is listening, and `MIC: off` otherwise -- on its own line rather than overlaying the model name, so it stays unambiguous.
-- `macropad/voice.py` deliberately records using PortAudio's *blocking* API (a plain `.read()` loop on a background thread) rather than its callback API. The callback API spawns a dedicated real-time PortAudio thread that has a [known race-condition bug](https://github.com/PortAudio/portaudio/issues/1011) (`paTimedOut` / `Error starting stream: Wait timed out`) that we hit reliably under WSL -- if you ever see that error while modifying this module, that's why.
+- API keys live in `.env` (see `.env.example`) -- loaded automatically at bridge startup
+- The OLED bottom line shows `MIC: REC` / `MIC: off` while recording
+- Every step degrades cleanly -- missing keys, failed API calls, or no mic all log and no-op
+- PortAudio blocking API is used (not callback) for WSL compatibility -- see `macropad/voice.py`
 
 ## `config/colors.yaml` -- what each state looks like
 
@@ -167,15 +215,40 @@ serial:
 
 voice:
   enabled: false
+  backend: local_whisper
   whisper_model: base
+  openai:
+    api_key_env: OPENAI_API_KEY
+    model: gpt-4o-mini-transcribe
+    realtime_model: gpt-realtime-whisper
+    delay: medium
+  together:
+    api_key_env: TOGETHER_API_KEY
+    model: openai/whisper-large-v3
+  triggers:
+    encoder: true
+
+encoder:
+  rotation_mode: session
 
 model_poll_interval_seconds: 5
 ```
 
 - `host`/`port`: the local socket hook scripts use to talk to the bridge. Only change this if `9999` is already taken by something else on your machine -- and if you do, restart the bridge.
 - `serial.retry_seconds`: how often the bridge tries to (re)find the MacroPad if it's unplugged, asleep, or not yet connected. Lower it if you want faster reconnects at the cost of slightly more CPU/USB polling.
-- `voice.enabled`/`voice.whisper_model`: see [Voice input](#voice-input-speak-instead-of-typing) above.
+- `voice.*`: see [Voice input](#voice-input-speak-instead-of-typing) above -- backend, API keys (`.env`), triggers.
+- `encoder.rotation_mode`: `session` (default) or `effort` -- what turning the knob does. See [Action keys](#action-keys-6-11---actions) above for the `effort` mode's behavior; `effort_levels:` under the same `encoder:` block overrides the default `[low, medium, high, max]` cycle.
 - `model_poll_interval_seconds`: how often the bridge re-checks the selected session's tmux pane to update the OLED's model line. Cheap (just a tmux pane snapshot), so the default (5s) is fine to leave alone.
+
+## Web UI: `macropad-webui`
+
+`uv sync --extra webui && uv run macropad-webui` starts a local web UI at `http://127.0.0.1:8787` for editing `colors.yaml`/`keymap.yaml`/`bridge.yaml` without hand-writing YAML -- a visual pad layout (click an action key 6-11 to configure it), color pickers + pulse toggles for each status, and forms for the voice backend and encoder settings.
+
+**Versions, not direct edits.** The UI never writes to `config/` directly. Edits happen against named "versions" under `config-versions/<name>/` (gitignored -- these are your personal drafts, not something to commit) -- full copies of the three editable files. Create/duplicate/rename/delete versions from the version bar at the top; the first run seeds a `default` version from whatever's currently in `config/`. Nothing reaches the live pad until you click **Apply to pad**, which copies the selected version's files over `config/*.yaml` and, if `macropad-bridge` is running, sends it a reload signal so voice/encoder settings take effect immediately (colors/keymap already reload on every access, no signal needed -- see the note at the top of this doc).
+
+Edits are written back with `ruamel.yaml`'s round-trip mode, not a full re-dump -- only the values you actually changed are touched, so hand-written comments, key order, and formatting elsewhere in the file survive. This matters because these files are meant to be read (and still hand-editable) even if you mostly use the UI.
+
+Out of scope for the UI: which project each session key (0-5) points at (`macropad-setup` or hand-edit `keys:` -- these are read-only in the pad-layout view) and `config/usage.yaml`.
 
 ## `config/usage.yaml` -- OLED usage dashboard
 
@@ -252,7 +325,9 @@ Run `uv run macropad-setup` again any time to change `enabled`/`source` interact
 
 Per-key LED behavior, the OLED dashboard layout, the selection-brightness/status-pulse rendering, and how JSON messages are parsed (in both directions) all live in [`firmware/code.py`](../firmware/code.py) on the MacroPad itself, not in this repo's Python. If you change it, re-copy the file to `CIRCUITPY/code.py` (or `uv run macropad-flash`, see [troubleshooting.md](troubleshooting.md#updating-firmware-over-wslusb-write-protect-errors-reverted-files)) -- no reboot needed, CircuitPython reloads `code.py` automatically on save.
 
-The OLED shows five lines total: two usage metrics (`5H [bar] 42%` / `7D [bar] 18%`, no header), a third line for the selected session's model name, a fourth line for the selected session's project label, and a fifth/bottom line as a compact status bar (currently just `MIC: off`/`MIC: REC`, deliberately terse to leave room for more fields later). To change how the usage bars *look* (e.g. wider bars) without touching the token-counting logic, edit the constants and `_render_bar`/`_render_metric_line`/`_apply_usage_message` near the top of `code.py`. `BAR_WIDTH` is deliberately conservative (10 chars) to leave room for the label and percentage on the same line within the OLED's 128px width at the built-in font's ~6px glyph width -- widen it carefully if you switch fonts or shorten the labels further. The third/fourth/fifth lines' rendering lives in `_apply_model_message`/`_apply_label_message`/`_apply_recording_message`.
+The OLED shows five lines total: two usage metrics (`5H [bar] 42%` / `7D [bar] 18%`, no header), a third line for the selected session's model name and (if known) effort level shown together as `Sonnet 4.5 - high`, a fourth line for the selected session's project label, and a fifth/bottom line as a compact status bar (currently just `MIC: off`/`MIC: REC`, deliberately terse to leave room for more fields later). To change how the usage bars *look* (e.g. wider bars) without touching the token-counting logic, edit the constants and `_render_bar`/`_render_metric_line`/`_apply_usage_message` near the top of `code.py`. `BAR_WIDTH` is deliberately conservative (10 chars) to leave room for the label and percentage on the same line within the OLED's 128px width at the built-in font's ~6px glyph width -- widen it carefully if you switch fonts or shorten the labels further. The third/fourth/fifth lines' rendering lives in `_apply_model_message`/`_apply_effort_message`/`_apply_label_message`/`_apply_recording_message`.
+
+The encoder's rotation mode (`session` vs `effort` -- see `config/bridge.yaml`'s `encoder.rotation_mode` above) is pushed from the host as `{"encoder_mode": "..."}` and stored in `_encoder_mode`; `_poll_encoder()` branches on it to decide whether a detent updates `_selected_key` (sending `{"selected": N}`) or forwards the raw delta to the host as `{"encoder_delta": N}` for the bridge to turn into an `/effort` cycle. The board has no config file of its own, so this mode is always host-driven, not something you set locally on the pad.
 
 **Gotcha if you add more OLED lines/colors**: the built-in OLED is monochrome, 1-bit-per-pixel -- `displayio` auto-converts any `label.Label(..., color=...)` you pick to plain black or white by luminance, there's no dimming/tinting. A color that "should" read as dim grey or dark red (anything with roughly less than half the luminance of white) silently converts to *black*, i.e. invisible text, not a dimmer version of it -- this is exactly what happened when the bottom status line first shipped with `0x606060`/`0xFF0000`, and it never rendered at all until switched to plain `0xFFFFFF`. Stick to `0xFFFFFF` (or another color with luminance clearly above ~50%, like the label line's `0x00CFFF`) for anything you actually want visible, and use the *text* itself, not color, to carry any on/off-style distinction.
 

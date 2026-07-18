@@ -121,7 +121,7 @@ To actually *look at* whichever session is currently selected without repeatedly
 
 ## Voice input
 
-Press the rotary encoder to start recording from your microphone, press it again to stop -- the transcription (fully offline, via [faster-whisper](https://github.com/SYSTRAN/faster-whisper), no API key or cloud round-trip) gets typed straight into the selected session, same as an action key. The OLED's bottom line shows `MIC: REC` the whole time, `MIC: off` otherwise.
+Press the rotary encoder (or an action key with `type: voice_toggle`) to start recording from your microphone, press again to stop -- transcription is sent into the selected session. Backends are configurable in `config/bridge.yaml` (`local_whisper`, `openai_realtime` for streaming gpt-realtime-whisper, `openai_gpt4o_mini`, `together_whisper`, etc.) -- see [docs/customization.md](docs/customization.md#voice-input-speak-instead-of-typing). API keys go in `.env` (copy from `.env.example`). The OLED's bottom line shows `MIC: REC` the whole time, `MIC: off` otherwise.
 
 Off by default -- it needs the optional `voice` extra (`uv sync --extra voice`), the system-level PortAudio library (`sudo apt install libportaudio2` on Debian/Ubuntu/WSL), and a microphone actually reachable from wherever the bridge runs. Then set `voice.enabled: true` in `config/bridge.yaml` and restart the bridge. See [docs/customization.md](docs/customization.md#voice-input-speak-instead-of-typing) for the full setup, including WSL-specific microphone notes.
 
@@ -153,7 +153,8 @@ macropad/            host-side Python package
   usage.py              local-estimate usage + the source dispatcher
   usage_monitor.py       optional Claude-Code-Usage-Monitor integration
   usage_pty.py            experimental live `claude /usage` scraper
-  voice.py               optional mic recording + local Whisper transcription
+          voice.py               mic recording (sounddevice) + stt backend dispatch
+          stt/                   pluggable STT backends (local, OpenAI, Together)
   bridge.py            the background daemon (macropad-bridge)
   sessions.py           tmux + `claude --remote-control` launcher (macropad-sessions), model detection
   firmware_flash.py       pushes firmware/*.py over the serial REPL (macropad-flash) -- see docs/troubleshooting.md
