@@ -35,13 +35,13 @@
 enabled: true
 
 # local_estimate | claude_monitor | claude_pty
-source: local_estimate
+source: claude_pty
 
 # How often (seconds) the bridge recomputes usage and refreshes the OLED.
 # 60s is fine for local_estimate/claude_monitor. If you switch to
 # claude_pty, use something much longer (300-900s) -- it launches a real
 # `claude` process every tick.
-poll_interval_seconds: 60
+poll_interval_seconds: 600
 
 # Rolling windows to sum tokens over (local_estimate only). 5h mirrors
 # Claude's session-limit window; 7d mirrors the weekly window.
@@ -62,11 +62,19 @@ claude_monitor:
 
 # Used when source: claude_pty
 claude_pty:
-  claude_command: "claude"
+  # Absolute path, not just "claude" -- systemd --user services run with a
+  # minimal PATH that doesn't include tool-manager install dirs (linuxbrew,
+  # nvm, etc.), so a bare "claude" fails to spawn silently (get_usage_
+  # percentages never raises) and this source falls back to local_estimate
+  # every single poll. Find yours with `which claude`.
+  claude_command: "/home/linuxbrew/.linuxbrew/bin/claude"
   # Directory to launch `claude` in. Must already be trusted (and claude
   # already logged in) -- run `claude` here by hand once first, or this
   # will just detect the wizard/login/trust screen and give up cleanly
   # every time. Defaults to your home directory if left null.
-  working_dir: null
+  # NOTE: your home directory ($HOME) is NOT currently trusted by this
+  # Claude install (check with `claude` -> the trust prompt appears), so
+  # working_dir is pinned to an already-trusted project instead.
+  working_dir: /home/tieandrews/wsl-projects/personal/emexams-remix
   # Total budget (seconds) for the whole launch-and-read cycle.
   timeout_seconds: 20

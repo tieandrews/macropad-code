@@ -18,3 +18,19 @@ serial:
   # Seconds between reconnect attempts when the MacroPad is unplugged,
   # asleep, or not yet found.
   retry_seconds: 2.0
+
+# Voice input: press the rotary encoder to start recording from this
+# machine's default microphone, press again to stop, transcribe locally,
+# and send the result into the currently selected session's tmux pane.
+# See macropad/voice.py and docs/customization.md before enabling --
+# needs `uv sync --extra voice` and a reachable microphone.
+voice:
+  enabled: true
+  # tiny | base | small | medium | large-v3 -- bigger is more accurate
+  # and much slower on CPU. Downloaded once and cached on first use.
+  whisper_model: base
+
+# How often (seconds) the bridge re-checks the selected session's tmux
+# pane for which Claude Code model it's using, to show on the OLED's
+# third line. Cheap (just a tmux pane snapshot), so this can be frequent.
+model_poll_interval_seconds: 5

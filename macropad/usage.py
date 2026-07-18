@@ -123,12 +123,17 @@ def _pct(tokens: int, budget: Optional[int]) -> Optional[int]:
 
 
 def _labels(settings: dict) -> tuple:
+    """Compact metric labels for the OLED's two-line usage dashboard --
+    just "5H"/"7D", not "SESSION 5H"/"WEEK 7D": with only ~21 characters
+    per line, and the row position itself already distinguishing session
+    from weekly, spelling that out again wastes space better spent on
+    the bar."""
     session_hours = settings.get("session_window_hours", 5)
     weekly_days = settings.get("weekly_window_days", 7)
-    return f"SESSION {session_hours:g}H", f"WEEK {weekly_days:g}D"
+    return f"{session_hours:g}H", f"{weekly_days:g}D"
 
 
-def _payload_from_local_estimate(settings: dict) -> dict:
+def _payload_from_local_estimate(settings: dict, fallback_from: Optional[str] = None) -> dict:
     session_hours = settings.get("session_window_hours", 5)
     weekly_days = settings.get("weekly_window_days", 7)
     computed = compute_usage(session_window_hours=session_hours, weekly_window_days=weekly_days)
@@ -136,7 +141,7 @@ def _payload_from_local_estimate(settings: dict) -> dict:
     weekly_tokens = computed["weekly_tokens"]
     session_label, weekly_label = _labels(settings)
 
-    return {
+    payload = {
         "usage": {
             "session": {
                 "label": session_label,
@@ -150,6 +155,15 @@ def _payload_from_local_estimate(settings: dict) -> dict:
             },
         }
     }
+    if fallback_from is not None:
+        # Not part of the wire message to the board -- bridge.py pops this
+        # back off before sending, purely so it can log *why* a poll fell
+        # back to token counts instead of silently doing so forever (this
+        # is always a transient/expected condition per claude_monitor.py /
+        # usage_pty.py's docstrings, e.g. a slow claude_pty launch racing
+        # its own timeout -- never a bug to "fix", just worth seeing).
+        payload["_fallback_from"] = fallback_from
+    return payload
 
 
 def _payload_from_percentages(settings: dict, pct_result: dict) -> dict:
@@ -197,6 +211,7 @@ def build_display_payload(settings: dict) -> dict:
         result = usage_monitor.read_monitor_percentages(monitor_settings.get("state_path"))
         if result is not None:
             return _payload_from_percentages(settings, result)
+        return _payload_from_local_estimate(settings, fallback_from=source)
 
     elif source == "claude_pty":
         from . import usage_pty
@@ -209,5 +224,6 @@ def build_display_payload(settings: dict) -> dict:
         )
         if result is not None:
             return _payload_from_percentages(settings, result)
+        return _payload_from_local_estimate(settings, fallback_from=source)
 
     return _payload_from_local_estimate(settings)

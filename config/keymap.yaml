@@ -1,37 +1,124 @@
 # =============================================================================
-# keymap.yaml -- MacroPad key -> project/agent assignment
+# keymap.yaml -- MacroPad key -> project/agent assignment, and action keys
 # =============================================================================
 # The Adafruit MacroPad RP2040 has 12 keys, numbered left-to-right,
-# top-to-bottom:
+# top-to-bottom, plus a rotary encoder:
 #
-#     0   1   2
-#     3   4   5
-#     6   7   8
-#     9  10  11
+#     0   1   2      <- "session" keys: one agent session each,
+#     3   4   5         status-light + selectable via the encoder
+#     6   7   8      <- "action" keys: send input to whichever
+#     9  10  11         session key is currently selected
 #
-# Assign each key you want to use as a status light to a project directory
-# and an agent. When a Claude Code or Codex CLI hook fires from that
-# directory (or a subdirectory of it), the bridge looks up the *longest
-# matching* project_path here and lights that key.
+# Rotate the encoder to change which of keys 0-5 is "selected" (its LED
+# pulses to show this); press an action key (6-11) to send that action's
+# `send_keys` text into the selected session's tmux pane. See
+# docs/customization.md for the full writeup, and macropad/sessions.py
+# for the tmux + `claude --remote-control` launcher this depends on.
 #
-# `macropad-setup` will offer to fill this in interactively, but you can
-# always hand-edit it -- see docs/customization.md.
+# `macropad-setup` will offer to fill `keys:` in interactively, but you
+# can always hand-edit this file -- see docs/customization.md.
 # =============================================================================
 
 keys:
   0:
-    label: "Example project"
-    agent: claude          # claude | codex
-    project_path: "~/projects/example"
+    label: macropad-code
+    agent: claude
+    project_path: /home/tieandrews/wsl-projects/personal/macropad-code
+  1:
+    label: emexams-remix
+    agent: claude
+    project_path: /home/tieandrews/wsl-projects/personal/emexams-remix
+  2:
+    label: emexams-website
+    agent: claude
+    project_path: /home/tieandrews/wsl-projects/personal/emexams-website
 
-# Add more keys as needed, e.g.:
-# 1:
+# Keys 3-5 are intentionally left unconfigured -- their LEDs stay off
+# (including while selected/pulsing) until you add an entry here.
+
+# Add more keys as needed (0-5 only -- 6-11 are action keys, below), e.g.:
+# 2:
 #   label: "api-server"
 #   agent: codex
 #   project_path: "~/projects/api-server"
+#
+# When a hook fires, the bridge reads the agent session's working
+# directory and looks for the entry whose project_path is the closest
+# ancestor of it -- see docs/customization.md. `agent: claude` also
+# controls what `macropad-sessions` launches inside that key's tmux
+# session (`claude --remote-control`); `agent: codex` starts a plain
+# `codex` (Codex CLI has no Remote-Control equivalent yet).
 
-# The rotary encoder isn't wired to anything by default. Reserved for
-# future use (e.g. cycling reasoning effort, muting the pad).
-encoder:
-  press_action: none
-  rotate_action: none
+# -----------------------------------------------------------------------------
+# actions -- keys 6-11, what each one sends to the *selected* session
+# -----------------------------------------------------------------------------
+# Two entry types:
+#
+#   type: send_keys (the default, so `type:` can be omitted) -- sends
+#     literal text via `tmux send-keys` into the selected key's tmux
+#     pane, with an optional `enter` (default true -- set false for
+#     things like Ctrl+C where you don't want a trailing Enter).
+#
+#   type: cycle_model -- each press advances to the next entry in
+#     `models:` (wraps around) and sends `/model <name>` into the
+#     selected session -- Claude Code's own command for switching
+#     models mid-session. The OLED's third line (see below) picks up
+#     the change within a few seconds. `models:` defaults to
+#     [sonnet, opus, haiku] if omitted.
+#
+# Left commented out by default -- nothing fires into a live agent
+# session until you explicitly configure it. Some starting ideas:
+#
+# actions:
+#   6:
+#     label: Approve
+#     send_keys: "y"
+#   7:
+#     label: Deny
+#     send_keys: "n"
+#   8:
+#     label: Interrupt
+#     send_keys: "C-c"
+#     enter: false
+#   9:
+#     label: Usage
+#     send_keys: "/usage"
+#   10:
+#     label: Switch model
+#     type: cycle_model
+#     models: [sonnet, opus, haiku]
+#   11:
+#     label: New chat
+#     send_keys: "/clear"
+actions:
+  6:
+    label: Approve
+    send_keys: "y"
+  7:
+    label: Deny
+    send_keys: "n"
+  8:
+    label: Interrupt
+    send_keys: "C-c"
+    enter: false
+  9:
+    label: Usage
+    send_keys: "/usage"
+  10:
+    label: Switch model
+    type: cycle_model
+    models: [sonnet, opus, haiku]
+  11:
+    label: New chat
+    send_keys: "/clear"
+
+# The encoder's rotation cycles the selected session key (0-5); this is
+# built into the firmware and isn't configurable here. Its OLED third
+# line shows the selected session's current model (auto-detected from
+# its tmux pane -- see macropad/sessions.py's detect_model()).
+#
+# Pressing the encoder toggles voice-to-text: press once to start
+# recording from this machine's microphone, press again to stop,
+# transcribe locally, and send the result into the selected session as
+# if you'd typed it. Off by default -- see `voice:` in
+# config/bridge.yaml and docs/customization.md to turn it on.

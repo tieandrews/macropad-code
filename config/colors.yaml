@@ -4,6 +4,13 @@
 # Each entry under `states` is a lifecycle state that a coding agent (Claude
 # Code, Codex CLI, ...) can be in. `color` is [R, G, B], each 0-255.
 #
+# `pulse: true` (optional, default false) makes that key's LED breathe
+# (dim <-> full brightness) instead of showing a flat color -- meant for
+# states you want to actively notice, e.g. "waiting" (the agent wants your
+# input). This is independent of which key is currently selected via the
+# encoder -- selection is shown as a brightness boost on top of whatever's
+# here, not an animation, so the two are never confused.
+#
 # `brightness` scales every color before it's sent to the MacroPad (0.0-1.0).
 # Keep it low-ish (0.2-0.4) if the pad sits right next to your monitor --
 # NeoPixels at full brightness are startlingly bright.
@@ -12,29 +19,31 @@
 # hook events.
 # =============================================================================
 
-brightness: 0.3
+brightness: 0.5
 
 states:
   idle:
-    color: [0, 20, 0]
+    color: [0, 20, 0]  # dim green
     description: No active agent session assigned to this key.
 
   working:
-    color: [255, 140, 0]
+    color: [255, 140, 0]  # orange
     description: Agent is actively thinking / running (prompt submitted, tool running).
 
   waiting:
-    color: [255, 0, 255]
+    color: [255, 0, 255]  # magenta / pink
     description: Agent has stopped and is waiting on your next input.
 
   permission:
-    color: [255, 0, 0]
+    color: [255, 0, 0]  # red
+    pulse: true
     description: Agent needs your approval before it can continue (tool permission prompt).
 
   done:
-    color: [0, 255, 0]
+    color: [0, 255, 0]  # green
     description: Agent finished its turn successfully.
 
   error:
-    color: [200, 0, 0]
+    color: [200, 0, 0]  # dark red
+    pulse: true
     description: Agent (or a hook) hit an error.

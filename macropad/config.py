@@ -106,3 +106,10 @@ def color_for_state(state: str) -> list:
     entry = states.get(state) or states.get("idle") or {"color": [0, 0, 0]}
     r, g, b = entry["color"]
     return [round(r * brightness), round(g * brightness), round(b * brightness)]
+
+
+def pulse_for_state(state: str) -> bool:
+    colors = load_colors()
+    states = colors.get("states", {})
+    entry = states.get(state) or {}
+    return bool(entry.get("pulse", False))

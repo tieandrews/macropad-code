@@ -15,10 +15,23 @@ autodetect = ["adafruit-board-toolkit>=1.1.0"]
 # raw ANSI terminal stream from a driven `claude` process into readable
 # text. See macropad/usage_pty.py.
 pty = ["pyte>=0.8.1"]
+# For config/bridge.yaml's `voice.enabled: true` (experimental) -- press
+# the encoder to record from the mic and transcribe locally. Also needs
+# the system-level PortAudio library (`sudo apt install libportaudio2` on
+# Debian/Ubuntu/WSL; bundled already on most other platforms). See
+# macropad/voice.py.
+voice = ["sounddevice>=0.4", "numpy>=1.24", "faster-whisper>=1.0"]
+# For `macropad-flash` -- pushes firmware/{boot.py,code.py} over the
+# serial REPL instead of copying to the CIRCUITPY mass-storage drive.
+# See macropad/firmware_flash.py and docs/troubleshooting.md ("Updating
+# firmware over WSL/USB") for why this exists.
+firmware = ["adafruit-ampy>=1.1.0"]
 
 [project.scripts]
 macropad-setup = "macropad.setup_cli:main"
 macropad-bridge = "macropad.bridge:main"
+macropad-sessions = "macropad.sessions:main"
+macropad-flash = "macropad.firmware_flash:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]

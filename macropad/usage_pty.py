@@ -24,16 +24,23 @@ you should understand the tradeoffs before enabling it (config/usage.yaml,
     clear both before enabling this.
   - It scrapes `/usage`'s rendered terminal text, not a documented data
     format -- that's a human-facing UI that can change wording or layout
-    in any Claude Code release. We have not been able to verify the exact
-    current wording of a real `/usage` panel against a live, logged-in
-    session (only the failure screens above), so the percentage regexes
-    below are best-effort. If they stop matching, this source silently
+    in any Claude Code release. Verified against Claude Code v2.1.212's
+    real, logged-in `/usage` panel; the percentage regexes below match
+    "Current session ... N% used" / "Current week (all models) ... N%
+    used". If wording changes in a future release, this source silently
     returns None and the bridge falls back to the local token-count
     estimate rather than showing stale or wrong numbers -- it will never
     raise or hang the bridge.
   - Requires the optional `pyte` dependency (`uv sync --extra pty`) to
     turn the raw ANSI terminal stream into readable text; without it, a
     much cruder regex-based ANSI stripper is used as a fallback.
+  - `claude_command` (config/usage.yaml) must be resolvable from wherever
+    this runs. If the bridge runs as a `systemd --user` service, its PATH
+    is minimal and won't include tool-manager install dirs (linuxbrew,
+    nvm, etc.) -- a bare "claude" then fails to spawn, and since this
+    function never raises, that failure is silent and just looks like
+    permanent fallback to local_estimate. Use an absolute path
+    (`which claude`) if you see that.
 """
 from __future__ import annotations
 
@@ -90,22 +97,40 @@ def _strip_ansi(raw: str) -> str:
     return text
 
 
-def _render_text(raw: bytes) -> str:
-    decoded = raw.decode("utf-8", errors="ignore")
-    try:
-        import pyte
-    except ImportError:
-        return _strip_ansi(decoded)
+class _Terminal:
+    """Wraps a pyte screen/stream pair so terminal state (cursor position,
+    prior redraws, etc.) persists across multiple feed() calls -- claude's
+    TUI often repaints incrementally rather than re-sending a full screen
+    on every update, so re-creating the screen per read loses content."""
 
-    screen = pyte.Screen(160, 60)
-    stream = pyte.Stream(screen)
-    stream.feed(decoded)
-    return "\n".join(screen.display)
+    def __init__(self) -> None:
+        self._pyte = None
+        try:
+            import pyte
+            self._pyte = pyte
+            self.screen = pyte.Screen(160, 60)
+            self.stream = pyte.Stream(self.screen)
+        except ImportError:
+            self._raw = ""
+
+    def feed(self, raw: bytes) -> str:
+        decoded = raw.decode("utf-8", errors="ignore")
+        if self._pyte is None:
+            self._raw += decoded
+            return _strip_ansi(self._raw)
+        self.stream.feed(decoded)
+        return "\n".join(self.screen.display)
 
 
 def _extract_percentages(text: str) -> Optional[dict]:
-    session_match = _SESSION_PCT_RE.search(text)
-    weekly_match = _WEEKLY_PCT_RE.search(text)
+    # pyte pads every line out to the screen's full column width, so the
+    # raw rendered text has runs of dozens of spaces between a label like
+    # "Current session" and its value on the line below -- collapse all
+    # whitespace (including newlines) first so the regexes' gap limits are
+    # measuring real intervening content, not screen padding.
+    normalized = re.sub(r"\s+", " ", text)
+    session_match = _SESSION_PCT_RE.search(normalized)
+    weekly_match = _WEEKLY_PCT_RE.search(normalized)
     if not session_match and not weekly_match:
         return None
     return {
@@ -159,12 +184,13 @@ def get_usage_percentages(claude_command: str = "claude",
         os.close(slave_fd)
         slave_fd = -1
 
-        boot_text = _render_text(_read_for(master_fd, ready_timeout))
+        terminal = _Terminal()
+        boot_text = terminal.feed(_read_for(master_fd, ready_timeout))
         if any(marker in boot_text for marker in _BLOCKED_MARKERS):
             return None
 
         os.write(master_fd, b"/usage\r")
-        usage_text = _render_text(_read_for(master_fd, usage_timeout))
+        usage_text = terminal.feed(_read_for(master_fd, usage_timeout))
         if any(marker in usage_text for marker in _BLOCKED_MARKERS):
             return None
 

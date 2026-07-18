@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Shows whether the WSL-side usbip auto-attach watcher is currently running
+# for the MacroPad. Doesn't need root -- process listing is unprivileged.
+set -euo pipefail
+
+if pgrep -af 'usbip-auto-attach' >/dev/null 2>&1; then
+    echo "auto-attach watcher: RUNNING"
+    pgrep -af 'usbip-auto-attach'
+else
+    echo "auto-attach watcher: PAUSED"
+fi
