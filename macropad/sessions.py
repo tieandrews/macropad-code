@@ -21,6 +21,7 @@ not an API key).
 """
 from __future__ import annotations
 
+import json
 import re
 import shlex
 import subprocess
@@ -44,8 +45,96 @@ FOLLOW_SESSION = "macropad-follow"
 # / welcome banner, e.g. "Opus 4.8", "Sonnet 4.5", "Haiku 4.5". Best-effort
 # text scraping, same caveats as usage_pty.py -- if Claude Code's UI
 # wording changes, this just stops matching and detect_model() returns
-# None rather than something wrong.
+# None rather than something wrong. Only used as a fallback now (see
+# detect_model_from_transcript() below) -- Claude Code 2.1+ doesn't show
+# the model name anywhere in the pane outside the initial welcome banner
+# (which scrolls away after the first prompt), so this alone stopped
+# working for any session that's actually been used.
 _MODEL_RE = re.compile(r"\b(Opus|Sonnet|Haiku)\s*[\d.]*", re.IGNORECASE)
+
+# Same store macropad/usage.py already reads -- Claude Code's own local
+# transcripts, one directory per project cwd.
+CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
+
+_KNOWN_MODEL_FAMILIES = ("opus", "sonnet", "haiku")
+
+
+def _claude_project_dir(project_path: str) -> Path:
+    """Claude Code's own directory-naming scheme for a project's local
+    transcripts: the resolved absolute path with every `/` *and* `_`
+    replaced by `-` (e.g. `/Users/ty/my_code/foo` ->
+    `-Users-ty-my-code-foo`). Verified directly against a live
+    `~/.claude/projects/` -- not documented anywhere, so this could in
+    principle change in a future Claude Code release, same caveat as
+    everything else here that reads its internals rather than a stable
+    API."""
+    resolved = str(Path(project_path).expanduser().resolve())
+    return CLAUDE_PROJECTS_DIR / re.sub(r"[/_]", "-", resolved)
+
+
+def _format_model_id(model_id: str) -> Optional[str]:
+    """Turns a raw Claude API model id (e.g. "claude-sonnet-4-5-20250929",
+    "claude-3-5-haiku-20241022", "claude-sonnet-5") into the same short
+    display form Claude Code's own UI uses (e.g. "Sonnet 4.5"). Returns
+    None if it doesn't look like a Claude model id at all (a different
+    agent, or a future id format this doesn't recognize) -- never
+    raises."""
+    tokens = model_id.lower().split("-")
+    if tokens and tokens[0] == "claude":
+        tokens = tokens[1:]
+    # Drop a trailing full date stamp (e.g. "20250929"), if present --
+    # everything else numeric is an actual version component.
+    if tokens and tokens[-1].isdigit() and len(tokens[-1]) == 8:
+        tokens = tokens[:-1]
+    family = next((t for t in tokens if t in _KNOWN_MODEL_FAMILIES), None)
+    if family is None:
+        return None
+    versions = [t for t in tokens if t.isdigit()]
+    label = family.capitalize()
+    if versions:
+        label += " " + ".".join(versions)
+    return label
+
+
+def detect_model_from_transcript(project_path: str) -> Optional[str]:
+    """Best-effort: reads the most recent assistant turn's `model` field
+    straight from Claude Code's own local transcript for `project_path`
+    (same ~/.claude/projects/ store macropad/usage.py reads), instead of
+    screen-scraping the tmux pane like detect_model() historically did.
+    This is the primary/preferred path now -- see _MODEL_RE's comment
+    above for why the pane-scrape alone stopped being reliable. Returns
+    None if there's no transcript directory/file for this project, or
+    no entry in the latest one has a `model` field -- never raises."""
+    try:
+        project_dir = _claude_project_dir(project_path)
+        if not project_dir.is_dir():
+            return None
+        jsonl_files = [p for p in project_dir.glob("*.jsonl") if p.is_file()]
+        if not jsonl_files:
+            return None
+        latest = max(jsonl_files, key=lambda p: p.stat().st_mtime)
+        with open(latest, "r") as f:
+            lines = f.readlines()
+    except OSError:
+        return None
+
+    for line in reversed(lines):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            continue
+        model_id = message.get("model")
+        if model_id:
+            formatted = _format_model_id(model_id)
+            if formatted:
+                return formatted
+    return None
 
 
 def session_name(key: int) -> str:
@@ -198,17 +287,28 @@ def capture_pane(key: int) -> Optional[str]:
 
 
 def detect_model(key: int) -> Optional[str]:
-    """Best-effort: scrapes the selected session's tmux pane for a
-    Claude Code model name currently in use (e.g. "Sonnet 4.5"). Returns
-    None if the session isn't running, or the pane doesn't currently
-    show a recognizable model name (scrolled away, mid-redraw, Codex
-    CLI which doesn't show one the same way, ...) -- never raises.
+    """Best-effort: the selected session's current Claude Code model
+    (e.g. "Sonnet 4.5"). Tries detect_model_from_transcript() first
+    (reads it straight from Claude Code's own local transcript for that
+    key's project_path -- reliable regardless of what's currently on
+    screen), falling back to scraping the tmux pane for agents with no
+    local transcript store of their own (Codex CLI) or if the transcript
+    lookup comes up empty for any reason. Returns None if neither works
+    -- never raises.
 
-    Only looks at the last few lines of the visible pane, where Claude
-    Code's status line actually lives -- otherwise this would just as
-    happily match a model name mentioned in scrollback (a prior
-    response, a `/model` command you just sent, ...), which is not
-    what's currently selected."""
+    The pane-scrape fallback only looks at the last few lines of the
+    visible pane, where a status line showing the model name might
+    live -- otherwise it'd just as happily match a model name mentioned
+    in scrollback (a prior response, a `/model` command you just sent,
+    ...), which isn't what's currently selected."""
+    keys = config.load_keymap().get("keys") or {}
+    entry = keys.get(key) or keys.get(str(key))
+    project_path = (entry or {}).get("project_path")
+    if project_path:
+        from_transcript = detect_model_from_transcript(project_path)
+        if from_transcript:
+            return from_transcript
+
     text = capture_pane(key)
     if not text:
         return None
