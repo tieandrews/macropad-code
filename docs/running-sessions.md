@@ -16,6 +16,8 @@ This is **idempotent** -- safe to re-run any time:
 
 Run it once per login, or wire it into whatever already starts your dev environment (a `.bashrc` line, a systemd `--user` unit, a Windows Task Scheduler entry, etc.) -- there's no built-in autostart for it since "your shell startup" varies too much across setups.
 
+**First run in a given `project_path` on a given machine:** Claude Code shows a one-time "Is this a project you created or one you trust?" prompt before it'll do anything, and `macropad-sessions` has no way to answer it for you (there's nobody "there" -- it's just `tmux send-keys` into a detached session). Until you answer it, that key's session sits stuck showing the prompt -- action keys/Remote Control silently do nothing, since there's no agent turn actually running yet. Attach once (`uv run macropad-sessions --attach <key>`, or `tmux attach -t macropad-key<N>`) and pick "1. Yes, I trust this folder", then detach (`Ctrl+B`, `D`) -- Claude Code remembers this per-directory, so it's a one-time step per `project_path` (moving a project to a new path, or a new machine, means doing it again there).
+
 ## Checking on sessions
 
 ```bash
