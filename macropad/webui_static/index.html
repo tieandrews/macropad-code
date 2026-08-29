@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MacroPad Config</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1d2026;
+    --panel-2: #262a32;
+    --border: #33383f;
+    --text: #e8e9ec;
+    --text-dim: #9aa0aa;
+    --accent: #7aa2ff;
+    --accent-2: #4fd1a5;
+    --danger: #ff6b6b;
+    --key-session: #2a3a4a;
+    --key-action: #3a2a4a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1.25rem;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-size: 1.05rem;
+    margin: 0;
+    font-weight: 600;
+    margin-right: auto;
+  }
+  select, input[type=text], input[type=number] {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.9rem;
+  }
+  button {
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.8rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary {
+    background: var(--accent);
+    color: #10121a;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  button.danger { color: var(--danger); }
+  .badge {
+    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    background: rgba(79, 209, 165, 0.15);
+    color: var(--accent-2);
+    border: 1px solid rgba(79, 209, 165, 0.4);
+  }
+  main {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 1.25rem;
+    padding: 1.25rem;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 1.25rem;
+  }
+  .panel h2 {
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    margin: 0 0 0.75rem 0;
+  }
+  .pad {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .pad-top {
+    display: flex;
+    gap: 0.75rem;
+    align-items: stretch;
+  }
+  .oled {
+    flex: 1;
+    background: #0a0a0a;
+    border: 2px solid #333;
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+    font-family: "Courier New", monospace;
+    font-size: 0.75rem;
+    color: #cfd8e3;
+    line-height: 1.5;
+    min-height: 90px;
+  }
+  .encoder {
+    width: 90px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+  }
+  .encoder-knob {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #444, #111 70%);
+    border: 2px solid #555;
+  }
+  .encoder small { color: var(--text-dim); font-size: 0.7rem; text-align: center; }
+  .key-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+  }
+  .key {
+    aspect-ratio: 1;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2rem;
+    cursor: default;
+    font-size: 0.7rem;
+    text-align: center;
+    padding: 0.3rem;
+    color: var(--text-dim);
+  }
+  .key.session { background: var(--key-session); cursor: pointer; }
+  .key.session:hover { border-color: var(--accent); }
+  .key.action { background: var(--key-action); cursor: pointer; }
+  .key.action:hover { border-color: var(--accent); }
+  .key.action.mic { background: #0d2a5c; border-color: #2f6fd6; }
+  .key.action.mic:hover { border-color: #5b9dff; }
+  .key.action.mic .key-label::before { content: "\1F3A4  "; }
+  .key .key-num { font-size: 0.65rem; opacity: 0.6; }
+  .key .key-label { color: var(--text); font-weight: 600; font-size: 0.72rem; }
+  .key .key-swatch {
+    width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.35);
+    margin-top: 0.1rem;
+  }
+  .row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.6rem; }
+  .row label { flex: 1; font-size: 0.85rem; color: var(--text-dim); }
+  .color-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
+  .color-row .state-name { flex: 1; font-size: 0.85rem; text-transform: capitalize; }
+  input[type=color] {
+    width: 34px; height: 28px; border: 1px solid var(--border); border-radius: 4px;
+    background: none; padding: 0; cursor: pointer;
+  }
+  .swatch-preview {
+    width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border);
+  }
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: none; align-items: center; justify-content: center; z-index: 10;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 1.25rem; width: 340px; max-width: 90vw;
+  }
+  .modal h3 { margin-top: 0; font-size: 1rem; }
+  .modal .row { margin-bottom: 0.75rem; }
+  .modal .row label { flex: none; width: 90px; }
+  .modal .row select, .modal .row input { flex: 1; width: 100%; }
+  .modal .row input[type=checkbox] { width: auto; flex: none; }
+  .modal .row input[type=color] { width: 34px; height: 28px; flex: none; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1rem; }
+  .hint { font-size: 0.75rem; color: var(--text-dim); margin-top: 0.4rem; line-height: 1.4; }
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 0.4rem;
+  }
+  .status-dot.on { background: var(--accent-2); }
+  .status-dot.off { background: var(--danger); }
+  .version-list { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.75rem; }
+  .version-item {
+    display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.5rem;
+    border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+  }
+  .version-item:hover { background: var(--panel-2); }
+  .version-item.active { background: rgba(122, 162, 255, 0.15); border: 1px solid var(--accent); }
+  .version-item .name { flex: 1; }
+  .toast {
+    position: fixed; bottom: 1.25rem; right: 1.25rem;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.6rem 1rem; font-size: 0.85rem; opacity: 0; transition: opacity 0.2s;
+    pointer-events: none; z-index: 20;
+  }
+  .toast.show { opacity: 1; }
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>MacroPad Config</h1>
+  <span id="bridgeStatus"><span class="status-dot off"></span>checking...</span>
+  <select id="versionSelect"></select>
+  <button id="newVersionBtn">New</button>
+  <button id="dupVersionBtn">Duplicate</button>
+  <button id="renameVersionBtn">Rename</button>
+  <button id="deleteVersionBtn" class="danger">Delete</button>
+  <button id="applyBtn" class="primary">Apply to pad</button>
+</header>
+
+<main>
+  <div>
+    <div class="panel">
+      <h2>Pad layout</h2>
+      <div class="pad">
+        <div class="pad-top">
+          <div class="oled" id="oledPreview"></div>
+          <div class="encoder">
+            <div class="encoder-knob"></div>
+            <small id="encoderModeLabel">rotation: session</small>
+          </div>
+        </div>
+        <div class="key-grid" id="sessionKeys"></div>
+        <div class="key-grid" id="actionKeys"></div>
+      </div>
+      <div class="hint">Click a key 0-5 (top) to assign it to a project, or a key 6-11 (bottom, highlighted blue if it's the mic toggle) to configure its action.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Encoder</h2>
+      <div class="row">
+        <label for="micToggleEnabled">Knob press toggles mic</label>
+        <input type="checkbox" id="micToggleEnabled">
+      </div>
+      <div class="row">
+        <label for="rotationMode">Knob rotation</label>
+        <select id="rotationMode">
+          <option value="session">Session select (default)</option>
+          <option value="effort">Effort cycle</option>
+        </select>
+      </div>
+      <div class="hint">In "Effort cycle" mode, rotating the knob sends <code>/effort</code> to whichever session is currently selected. Keys 0-5 still pick which session that is -- only rotation is repurposed.</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>LED colors</h2>
+      <div id="colorRows"></div>
+      <div class="row" style="margin-top: 0.75rem;">
+        <label for="brightness">Global brightness</label>
+        <input type="range" id="brightness" min="0" max="1" step="0.05" style="flex:2">
+        <span id="brightnessValue" style="width: 3rem; text-align: right; font-size: 0.8rem;"></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Voice backend</h2>
+      <div class="row">
+        <label for="voiceEnabled">Voice input enabled</label>
+        <input type="checkbox" id="voiceEnabled">
+      </div>
+      <div class="row">
+        <label for="voiceBackend">Backend</label>
+        <select id="voiceBackend">
+          <option value="local_whisper">Local Whisper (offline)</option>
+          <option value="openai_whisper">OpenAI Whisper (batch)</option>
+          <option value="openai_gpt4o_mini">OpenAI gpt-4o-mini-transcribe</option>
+          <option value="openai_realtime">OpenAI realtime streaming</option>
+          <option value="together_whisper">Together Whisper (batch)</option>
+          <option value="together_realtime">Together realtime streaming</option>
+        </select>
+      </div>
+      <div class="hint">API keys go in <code>.env</code> (see <code>.env.example</code>), not here.</div>
+    </div>
+  </div>
+</main>
+
+<div class="modal-backdrop" id="keyModalBackdrop">
+  <div class="modal">
+    <h3 id="keyModalTitle">Configure key</h3>
+    <div class="row">
+      <label>Label</label>
+      <input type="text" id="keyLabel">
+    </div>
+    <div class="row">
+      <label>Type</label>
+      <select id="keyType">
+        <option value="send_keys">Send text</option>
+        <option value="cycle_model">Cycle model</option>
+        <option value="cycle_effort">Cycle effort</option>
+        <option value="voice_toggle">Mic toggle</option>
+        <option value="resync">Resync LEDs</option>
+      </select>
+    </div>
+    <div id="keyTypeFields"></div>
+    <div id="keyColorSection">
+      <div class="row">
+        <label for="keyColorEnabled">Custom LED color</label>
+        <input type="checkbox" id="keyColorEnabled">
+      </div>
+      <div id="keyColorFields">
+        <div class="row">
+          <label>Color</label>
+          <input type="color" id="keyColor">
+        </div>
+        <div class="row">
+          <label>Brightness</label>
+          <input type="range" id="keyBrightness" min="0" max="1" step="0.05" style="flex:2">
+          <span id="keyBrightnessValue" style="width: 3rem; text-align: right; font-size: 0.8rem;"></span>
+        </div>
+      </div>
+      <div class="hint">Off (unchecked) leaves this key's LED dark, as before. Brightness defaults to the global brightness above if left alone -- lower it for a deliberately subtle/low-light key.</div>
+    </div>
+    <div class="modal-actions">
+      <button id="keyModalCancel">Cancel</button>
+      <button id="keyModalSave" class="primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="sessionModalBackdrop">
+  <div class="modal">
+    <h3 id="sessionModalTitle">Configure session key</h3>
+    <div class="row">
+      <label>Label</label>
+      <input type="text" id="sessionLabel" placeholder="e.g. my-project">
+    </div>
+    <div class="row">
+      <label>Project path</label>
+      <input type="text" id="sessionProjectPath" placeholder="/home/you/projects/my-project">
+    </div>
+    <div class="row">
+      <label>Agent</label>
+      <select id="sessionAgent">
+        <option value="claude">Claude Code</option>
+        <option value="codex">Codex CLI</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>Permission mode</label>
+      <select id="sessionPermissionMode">
+        <option value="">(default -- manual)</option>
+        <option value="manual">Manual</option>
+        <option value="auto">Auto</option>
+        <option value="bypassPermissions">Bypass (YOLO)</option>
+      </select>
+    </div>
+    <div class="hint">Passed as Claude Code's <code>--permission-mode</code> flag when this session is launched via <code>macropad-sessions</code>. Codex CLI ignores this. Leaving a key's project path empty leaves it unassigned -- its LED stays dark.</div>
+    <div class="modal-actions">
+      <button id="sessionModalCancel">Cancel</button>
+      <button id="sessionModalSave" class="primary">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="promptModalBackdrop">
+  <div class="modal">
+    <h3 id="promptModalTitle">New version</h3>
+    <div class="row">
+      <input type="text" id="promptModalInput" style="width:100%">
+    </div>
+    <div class="modal-actions">
+      <button id="promptModalCancel">Cancel</button>
+      <button id="promptModalOk" class="primary">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const state = {
+  versions: [],
+  current: null,
+  config: null, // { colors, keymap, bridge }
+  editingKey: null,
+};
+
+const $ = (id) => document.getElementById(id);
+
+function toast(msg, isError) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.style.borderColor = isError ? 'var(--danger)' : 'var(--border)';
+  el.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+async function api(path, opts) {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+function rgbToHex([r, g, b]) {
+  return '#' + [r, g, b].map(c => Math.round(c).toString(16).padStart(2, '0')).join('');
+}
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+// --- versions ------------------------------------------------------------
+
+async function refreshVersions() {
+  const data = await api('/api/versions');
+  state.versions = data.versions;
+  const select = $('versionSelect');
+  select.innerHTML = '';
+  for (const v of state.versions) {
+    const opt = document.createElement('option');
+    opt.value = v.name;
+    opt.textContent = v.applied ? `${v.name} (applied)` : v.name;
+    select.appendChild(opt);
+  }
+  if (!state.current || !state.versions.some(v => v.name === state.current)) {
+    const applied = state.versions.find(v => v.applied);
+    state.current = applied ? applied.name : (state.versions[0] && state.versions[0].name);
+  }
+  select.value = state.current;
+  await loadCurrentConfig();
+}
+
+async function loadCurrentConfig() {
+  if (!state.current) return;
+  state.config = await api(`/api/versions/${encodeURIComponent(state.current)}/config`);
+  renderAll();
+}
+
+async function saveCurrentConfig() {
+  if (!state.current || !state.config) return;
+  await api(`/api/versions/${encodeURIComponent(state.current)}/config`, {
+    method: 'PUT',
+    body: JSON.stringify(state.config),
+  });
+}
+
+let saveTimer = null;
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveCurrentConfig().catch(err => toast(err.message, true));
+  }, 400);
+}
+
+$('versionSelect').addEventListener('change', async (e) => {
+  state.current = e.target.value;
+  await loadCurrentConfig();
+});
+
+$('newVersionBtn').addEventListener('click', async () => {
+  const name = await promptModal('New version', '');
+  if (!name) return;
+  try {
+    await api('/api/versions', { method: 'POST', body: JSON.stringify({ name }) });
+    state.current = name;
+    await refreshVersions();
+    toast(`Created "${name}"`);
+  } catch (err) { toast(err.message, true); }
+});
+
+$('dupVersionBtn').addEventListener('click', async () => {
+  const name = await promptModal('Duplicate as', `${state.current}-copy`);
+  if (!name) return;
+  try {
+    await api('/api/versions', {
+      method: 'POST',
+      body: JSON.stringify({ name, clone_from: state.current }),
+    });
+    state.current = name;
+    await refreshVersions();
+    toast(`Duplicated as "${name}"`);
+  } catch (err) { toast(err.message, true); }
+});
+
+$('renameVersionBtn').addEventListener('click', async () => {
+  const name = await promptModal('Rename to', state.current);
+  if (!name || name === state.current) return;
+  try {
+    await api(`/api/versions/${encodeURIComponent(state.current)}/rename`, {
+      method: 'POST',
+      body: JSON.stringify({ new_name: name }),
+    });
+    state.current = name;
+    await refreshVersions();
+    toast(`Renamed to "${name}"`);
+  } catch (err) { toast(err.message, true); }
+});
+
+$('deleteVersionBtn').addEventListener('click', async () => {
+  if (state.versions.length <= 1) { toast('Cannot delete the only version', true); return; }
+  if (!confirm(`Delete version "${state.current}"? This cannot be undone.`)) return;
+  try {
+    await api(`/api/versions/${encodeURIComponent(state.current)}`, { method: 'DELETE' });
+    state.current = null;
+    await refreshVersions();
+    toast('Deleted');
+  } catch (err) { toast(err.message, true); }
+});
+
+$('applyBtn').addEventListener('click', async () => {
+  if (!confirm(`Apply "${state.current}" to the live pad config? This overwrites config/*.yaml.`)) return;
+  try {
+    await saveCurrentConfig();
+    const result = await api(`/api/versions/${encodeURIComponent(state.current)}/apply`, { method: 'POST' });
+    await refreshVersions();
+    toast(result.notified_bridge ? 'Applied and bridge notified' : 'Applied (bridge not running -- start it to take effect)');
+  } catch (err) { toast(err.message, true); }
+});
+
+// --- rendering -------------------------------------------------------------
+
+const SESSION_KEYS = [0, 1, 2, 3, 4, 5];
+const ACTION_KEYS = [6, 7, 8, 9, 10, 11];
+
+function renderAll() {
+  renderPad();
+  renderColors();
+  renderVoice();
+  renderEncoder();
+}
+
+function renderPad() {
+  const keymap = state.config.keymap || {};
+  const keys = keymap.keys || {};
+  const actions = keymap.actions || {};
+
+  const sessionEl = $('sessionKeys');
+  sessionEl.innerHTML = '';
+  for (const k of SESSION_KEYS) {
+    const entry = keys[k] || keys[String(k)];
+    const div = document.createElement('div');
+    div.className = 'key session';
+    div.innerHTML = `<div class="key-num">${k}</div><div class="key-label">${entry ? entry.label : '(unassigned)'}</div>`;
+    div.addEventListener('click', () => openSessionModal(k));
+    sessionEl.appendChild(div);
+  }
+
+  const actionEl = $('actionKeys');
+  actionEl.innerHTML = '';
+  for (const k of ACTION_KEYS) {
+    const entry = actions[k] || actions[String(k)];
+    const isMic = entry && entry.type === 'voice_toggle';
+    const hasColor = entry && Array.isArray(entry.color) && entry.type !== 'voice_toggle';
+    const div = document.createElement('div');
+    div.className = 'key action' + (isMic ? ' mic' : '');
+    div.innerHTML = `<div class="key-num">${k}</div><div class="key-label">${entry ? entry.label : '(none)'}</div>` +
+      (hasColor ? `<div class="key-swatch" style="background:${rgbToHex(entry.color)}"></div>` : '');
+    div.addEventListener('click', () => openKeyModal(k));
+    actionEl.appendChild(div);
+  }
+
+  const oled = $('oledPreview');
+  const label = (keys[0] || {}).label || '';
+  oled.textContent = `SESSION [##########] 40%\nWEEKLY   [######....] 60%\nSonnet 4.5 - high\n${label}\nMIC: off`;
+}
+
+function renderColors() {
+  const colors = state.config.colors || {};
+  const states = colors.states || {};
+  const container = $('colorRows');
+  container.innerHTML = '';
+  for (const [name, entry] of Object.entries(states)) {
+    const row = document.createElement('div');
+    row.className = 'color-row';
+    row.innerHTML = `
+      <span class="state-name">${name}</span>
+      <input type="color" value="${rgbToHex(entry.color || [0,0,0])}">
+      <label style="flex:none; font-size:0.75rem;"><input type="checkbox" ${entry.pulse ? 'checked' : ''} style="vertical-align:middle;"> pulse</label>
+    `;
+    const colorInput = row.querySelector('input[type=color]');
+    const pulseInput = row.querySelector('input[type=checkbox]');
+    colorInput.addEventListener('input', () => {
+      entry.color = hexToRgb(colorInput.value);
+      scheduleSave();
+    });
+    pulseInput.addEventListener('change', () => {
+      entry.pulse = pulseInput.checked;
+      scheduleSave();
+    });
+    container.appendChild(row);
+  }
+  const brightness = colors.brightness ?? 0.5;
+  $('brightness').value = brightness;
+  $('brightnessValue').textContent = brightness;
+  $('brightness').oninput = (e) => {
+    colors.brightness = parseFloat(e.target.value);
+    $('brightnessValue').textContent = e.target.value;
+    scheduleSave();
+  };
+}
+
+function renderVoice() {
+  const bridge = state.config.bridge || {};
+  const voice = bridge.voice || {};
+  $('voiceEnabled').checked = !!voice.enabled;
+  $('voiceBackend').value = voice.backend || 'local_whisper';
+  $('voiceEnabled').onchange = (e) => {
+    voice.enabled = e.target.checked;
+    bridge.voice = voice;
+    scheduleSave();
+  };
+  $('voiceBackend').onchange = (e) => {
+    voice.backend = e.target.value;
+    bridge.voice = voice;
+    scheduleSave();
+  };
+
+  const triggers = voice.triggers || {};
+  $('micToggleEnabled').checked = triggers.encoder !== false;
+  $('micToggleEnabled').onchange = (e) => {
+    voice.triggers = { ...triggers, encoder: e.target.checked };
+    bridge.voice = voice;
+    scheduleSave();
+  };
+}
+
+function renderEncoder() {
+  const bridge = state.config.bridge || {};
+  const encoder = bridge.encoder || {};
+  const mode = encoder.rotation_mode || 'session';
+  $('rotationMode').value = mode;
+  $('encoderModeLabel').textContent = `rotation: ${mode}`;
+  $('rotationMode').onchange = (e) => {
+    bridge.encoder = { ...encoder, rotation_mode: e.target.value };
+    $('encoderModeLabel').textContent = `rotation: ${e.target.value}`;
+    scheduleSave();
+  };
+}
+
+// --- session key modal ---------------------------------------------------
+
+function openSessionModal(keyNum) {
+  state.editingSessionKey = keyNum;
+  const keymap = state.config.keymap || (state.config.keymap = {});
+  const keys = keymap.keys || (keymap.keys = {});
+  const entry = keys[keyNum] || keys[String(keyNum)] || {};
+
+  $('sessionModalTitle').textContent = `Configure session key ${keyNum}`;
+  $('sessionLabel').value = entry.label || '';
+  $('sessionProjectPath').value = entry.project_path || '';
+  $('sessionAgent').value = entry.agent || 'claude';
+  $('sessionPermissionMode').value = entry.permission_mode || '';
+  $('sessionModalBackdrop').classList.add('open');
+}
+
+$('sessionModalCancel').addEventListener('click', () => $('sessionModalBackdrop').classList.remove('open'));
+
+$('sessionModalSave').addEventListener('click', () => {
+  const keyNum = state.editingSessionKey;
+  const keymap = state.config.keymap || (state.config.keymap = {});
+  const keys = keymap.keys || (keymap.keys = {});
+  const projectPath = $('sessionProjectPath').value.trim();
+
+  delete keys[String(keyNum)];
+  if (!projectPath) {
+    // No project path -- leave this key unassigned, same as never
+    // having configured it (LED stays dark, no tmux session to start).
+    delete keys[keyNum];
+  } else {
+    const entry = {
+      label: $('sessionLabel').value.trim() || `key${keyNum}`,
+      agent: $('sessionAgent').value,
+      project_path: projectPath,
+    };
+    const permissionMode = $('sessionPermissionMode').value;
+    if (permissionMode) entry.permission_mode = permissionMode;
+    keys[keyNum] = entry;
+  }
+
+  $('sessionModalBackdrop').classList.remove('open');
+  renderPad();
+  scheduleSave();
+});
+
+// --- action key modal --------------------------------------------------
+
+function defaultBrightness() {
+  const colors = state.config.colors || {};
+  return colors.brightness ?? 1.0;
+}
+
+function renderKeyColorFields(entry) {
+  const type = $('keyType').value;
+  const isVoiceToggle = type === 'voice_toggle';
+  $('keyColorSection').style.display = isVoiceToggle ? 'none' : '';
+  if (isVoiceToggle) return;
+
+  const hasColor = Array.isArray(entry.color);
+  $('keyColorEnabled').checked = hasColor;
+  $('keyColor').value = hasColor ? rgbToHex(entry.color) : '#00c800';
+  const brightness = entry.brightness ?? defaultBrightness();
+  $('keyBrightness').value = brightness;
+  $('keyBrightnessValue').textContent = brightness;
+  $('keyColorFields').style.display = hasColor ? '' : 'none';
+}
+
+function openKeyModal(keyNum) {
+  state.editingKey = keyNum;
+  const keymap = state.config.keymap || (state.config.keymap = {});
+  const actions = keymap.actions || (keymap.actions = {});
+  const entry = actions[keyNum] || actions[String(keyNum)] || { label: '', type: 'send_keys' };
+
+  $('keyModalTitle').textContent = `Configure key ${keyNum}`;
+  $('keyLabel').value = entry.label || '';
+  $('keyType').value = entry.type || 'send_keys';
+  renderKeyTypeFields(entry);
+  renderKeyColorFields(entry);
+  $('keyType').onchange = () => {
+    renderKeyTypeFields({ type: $('keyType').value });
+    renderKeyColorFields(entry);
+  };
+  $('keyColorEnabled').onchange = () => {
+    $('keyColorFields').style.display = $('keyColorEnabled').checked ? '' : 'none';
+  };
+  $('keyBrightness').oninput = (e) => {
+    $('keyBrightnessValue').textContent = e.target.value;
+  };
+  $('keyModalBackdrop').classList.add('open');
+}
+
+function renderKeyTypeFields(entry) {
+  const container = $('keyTypeFields');
+  const type = entry.type || 'send_keys';
+  if (type === 'send_keys') {
+    container.innerHTML = `
+      <div class="row"><label>Send</label><input type="text" id="fld_send_keys" value="${entry.send_keys || ''}"></div>
+      <div class="row"><label>Press Enter</label><input type="checkbox" id="fld_enter" ${entry.enter !== false ? 'checked' : ''}></div>
+    `;
+  } else if (type === 'cycle_model') {
+    container.innerHTML = `
+      <div class="row"><label>Models</label><input type="text" id="fld_models" value="${(entry.models || ['sonnet','opus','haiku']).join(', ')}"></div>
+      <div class="hint">Comma-separated, cycles in order.</div>
+    `;
+  } else if (type === 'cycle_effort') {
+    container.innerHTML = `
+      <div class="row"><label>Levels</label><input type="text" id="fld_levels" value="${(entry.levels || ['low','medium','high','max']).join(', ')}"></div>
+      <div class="hint">Comma-separated, sends <code>/effort &lt;level&gt;</code>.</div>
+    `;
+  } else if (type === 'voice_toggle') {
+    container.innerHTML = `<div class="hint">Toggles voice recording, same as the encoder press.</div>`;
+  } else if (type === 'resync') {
+    container.innerHTML = `<div class="hint">Forces every session key's (0-5) LED to match reality right now, and re-pushes every other action key's custom color -- fixes a key stuck showing a stale color without needing to unplug the pad.</div>`;
+  }
+}
+
+$('keyModalCancel').addEventListener('click', () => $('keyModalBackdrop').classList.remove('open'));
+
+$('keyModalSave').addEventListener('click', () => {
+  const keyNum = state.editingKey;
+  const keymap = state.config.keymap || (state.config.keymap = {});
+  const actions = keymap.actions || (keymap.actions = {});
+  const type = $('keyType').value;
+  const label = $('keyLabel').value.trim() || `action${keyNum}`;
+  let entry = { label };
+  if (type === 'send_keys') {
+    entry.send_keys = ($('fld_send_keys') || {}).value || '';
+    entry.enter = !!($('fld_enter') || {}).checked;
+  } else if (type === 'cycle_model') {
+    entry.type = 'cycle_model';
+    entry.models = ($('fld_models').value || '').split(',').map(s => s.trim()).filter(Boolean);
+  } else if (type === 'cycle_effort') {
+    entry.type = 'cycle_effort';
+    entry.levels = ($('fld_levels').value || '').split(',').map(s => s.trim()).filter(Boolean);
+  } else if (type === 'voice_toggle') {
+    entry.type = 'voice_toggle';
+  } else if (type === 'resync') {
+    entry.type = 'resync';
+  }
+  if (type !== 'voice_toggle' && $('keyColorEnabled').checked) {
+    entry.color = hexToRgb($('keyColor').value);
+    const brightness = parseFloat($('keyBrightness').value);
+    if (brightness !== defaultBrightness()) entry.brightness = brightness;
+  }
+  delete actions[String(keyNum)];
+  actions[keyNum] = entry;
+  $('keyModalBackdrop').classList.remove('open');
+  renderPad();
+  scheduleSave();
+});
+
+// --- prompt modal (replaces window.prompt for consistent styling) ------
+
+function promptModal(title, defaultValue) {
+  return new Promise((resolve) => {
+    $('promptModalTitle').textContent = title;
+    $('promptModalInput').value = defaultValue || '';
+    $('promptModalBackdrop').classList.add('open');
+    $('promptModalInput').focus();
+
+    const cleanup = () => {
+      $('promptModalBackdrop').classList.remove('open');
+      $('promptModalOk').onclick = null;
+      $('promptModalCancel').onclick = null;
+    };
+    $('promptModalOk').onclick = () => {
+      const val = $('promptModalInput').value.trim();
+      cleanup();
+      resolve(val || null);
+    };
+    $('promptModalCancel').onclick = () => { cleanup(); resolve(null); };
+  });
+}
+
+// --- bridge status ---------------------------------------------------------
+
+async function pollBridgeStatus() {
+  try {
+    const data = await api('/api/state');
+    const el = $('bridgeStatus');
+    el.innerHTML = `<span class="status-dot ${data.bridge_running ? 'on' : 'off'}"></span>${data.bridge_running ? 'bridge running' : 'bridge not running'}`;
+  } catch (e) { /* ignore */ }
+}
+
+// --- init --------------------------------------------------------------
+
+refreshVersions().catch(err => toast(err.message, true));
+pollBridgeStatus();
+setInterval(pollBridgeStatus, 5000);
+</script>
+</body>
+</html>

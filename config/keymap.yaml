@@ -1,0 +1,154 @@
+# =============================================================================
+# keymap.yaml -- MacroPad key -> project/agent assignment, and action keys
+# =============================================================================
+# The Adafruit MacroPad RP2040 has 12 keys, numbered left-to-right,
+# top-to-bottom, plus a rotary encoder:
+#
+#     0   1   2      <- "session" keys: one agent session each,
+#     3   4   5         status-light + selectable via the encoder
+#     6   7   8      <- "action" keys: send input to whichever
+#     9  10  11         session key is currently selected
+#
+# Rotate the encoder to change which of keys 0-5 is "selected" (its LED
+# pulses to show this); press an action key (6-11) to send that action's
+# `send_keys` text into the selected session's tmux pane. See
+# docs/customization.md for the full writeup, and macropad/sessions.py
+# for the tmux + `claude --remote-control` launcher this depends on.
+#
+# `macropad-setup` will offer to fill `keys:` in interactively, but you
+# can always hand-edit this file -- see docs/customization.md.
+# =============================================================================
+
+keys:
+  0:
+    label: macropad-code
+    agent: claude
+    project_path: /Users/tya/projects_tmp/macropad-code
+    permission_mode: bypassPermissions
+  1:
+    label: emexams-remix
+    agent: claude
+    project_path: /Users/tya/projects_tmp/emexams-remix
+    permission_mode: auto
+  2:
+    label: emexams-website
+    agent: claude
+    project_path: /Users/tya/projects_tmp/emexams-website
+
+# Keys 3-5 are intentionally left unconfigured -- their LEDs stay off
+# (including while selected/pulsing) until you add an entry here.
+
+# Add more keys as needed (0-5 only -- 6-11 are action keys, below), e.g.:
+# 2:
+#   label: "api-server"
+#   agent: codex
+#   project_path: "~/projects/api-server"
+#
+# When a hook fires, the bridge reads the agent session's working
+# directory and looks for the entry whose project_path is the closest
+# ancestor of it -- see docs/customization.md. `agent: claude` also
+# controls what `macropad-sessions` launches inside that key's tmux
+# session (`claude --remote-control`); `agent: codex` starts a plain
+# `codex` (Codex CLI has no Remote-Control equivalent yet).
+
+# -----------------------------------------------------------------------------
+# actions -- keys 6-11, what each one sends to the *selected* session
+# -----------------------------------------------------------------------------
+# Two entry types:
+#
+#   type: send_keys (the default, so `type:` can be omitted) -- sends
+#     literal text via `tmux send-keys` into the selected key's tmux
+#     pane, with an optional `enter` (default true -- set false for
+#     things like Ctrl+C where you don't want a trailing Enter).
+#
+#   type: cycle_model -- each press advances to the next entry in
+#     `models:` (wraps around) and sends `/model <name>` into the
+#     selected session -- Claude Code's own command for switching
+#     models mid-session. The OLED's third line (see below) picks up
+#     the change within a few seconds. `models:` defaults to
+#     [sonnet, opus, haiku] if omitted.
+#
+#   type: cycle_effort -- each press advances to the next entry in
+#     `levels:` (defaults to [low, medium, high, max]) and sends
+#     `/effort <level>` into the selected session. Same rotation logic
+#     also drives config/bridge.yaml's `encoder.rotation_mode: effort`.
+#
+#   type: voice_toggle -- press-and-hold to record, release to stop
+#     (hold-to-talk), or a quick tap to keep recording hands-free until
+#     a later tap stops it -- same gesture as the encoder press. This
+#     key's LED shows mic state independent of any other status color:
+#     dim blue idle, bright blue while recording, amber if a transcript
+#     is pending review (see config/bridge.yaml's voice.auto_enter).
+#     Configure backend/timing in config/bridge.yaml and .env.
+#
+# `color`/`brightness` (optional, any type except voice_toggle -- that
+# one's LED is entirely host-driven): gives the key its own static LED
+# color, e.g. so Approve/Deny/etc are visually distinct at a glance
+# instead of all staying dark. `color: [r, g, b]` (0-255 each).
+# `brightness` (0.0-1.0) scales it before sending to the board and
+# defaults to colors.yaml's global `brightness` if omitted -- set it
+# per-key to make one action deliberately dimmer/brighter than the
+# rest, e.g. a subtle low-light Approve next to a normal-brightness
+# Deny. A key with no `color` set just stays off, as before. Takes
+# effect immediately on the next bridge (re)start, the `type: resync`
+# action key, or the web UI's "Apply to pad".
+#
+# Left commented out by default -- nothing fires into a live agent
+# session until you explicitly configure it. Some starting ideas:
+#
+# actions:
+#   6:
+#     label: Approve
+#     send_keys: "y"
+#     color: [0, 200, 0]     # subtle, low-light green
+#     brightness: 0.12
+#   7:
+#     label: Deny
+#     send_keys: "n"
+#     color: [255, 0, 0]     # red
+#   8:
+#     label: Interrupt
+#     send_keys: "C-c"
+#     enter: false
+#   9:
+#     label: Usage
+#     send_keys: "/usage"
+#   10:
+#     label: Switch model
+#     type: cycle_model
+#     models: [sonnet, opus, haiku]
+#     color: [255, 255, 255] # white
+#   11:
+#     label: New chat
+#     send_keys: "/clear"
+#     color: [255, 140, 0]   # orange
+    permission_mode: bypassPermissions
+actions:
+  6:
+    label: Approve
+    send_keys: "y"
+    color: [0, 200, 0] # subtle, low-light green
+    brightness: 0.12
+  7:
+    label: Deny
+    send_keys: "n"
+    color: [255, 0, 0] # red
+  8:
+    label: Resync
+    type: resync
+  9:
+    label: Change Model
+    type: cycle_model
+    models:
+      - sonnet
+      - opus
+      - haiku
+    color: [255, 255, 255] # white
+  10:
+    label: Clear Session
+    send_keys: /clear
+    enter: true
+    color: [255, 140, 0] # orange
+  11:
+    label: Mic Toggle
+    type: voice_toggle

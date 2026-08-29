@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Restarts the WSL-side usbip-auto-attach watcher for the MacroPad, so it
+# goes back to automatically attaching to WSL whenever it's plugged in
+# (the normal day-to-day setup for coding against the bridge).
+#
+# Re-implements what `usbipd attach --wsl --busid <busid> --auto-attach`
+# sets up on the Windows side, so you don't need to touch Windows to
+# resume convenience mode. If it fails for any reason, just run that
+# command from an elevated Windows PowerShell instead.
+#
+# Installed with a NOPASSWD sudoers rule (see docs/troubleshooting.md) so
+# it can be run without a password prompt: `sudo macropad-usb-resume`.
+set -euo pipefail
+
+BUSID="${1:-2-8}"
+LOG="/var/log/macropad-usb-auto-attach.log"
+
+if pgrep -f "usbip-auto-attach .*--busid $BUSID" >/dev/null 2>&1; then
+    echo "already running: auto-attach watcher for busid $BUSID"
+    exit 0
+fi
+
+HOST_IP="$(ip route show default 2>/dev/null | awk '{print $3; exit}')"
+if [ -z "$HOST_IP" ]; then
+    echo "could not determine Windows host IP; run" >&2
+    echo "  usbipd attach --wsl --busid $BUSID --auto-attach" >&2
+    echo "from an elevated Windows PowerShell instead." >&2
+    exit 1
+fi
+
+nohup /run/usbipd-win/usbip-auto-attach "$HOST_IP" --busid "$BUSID" \
+    --usbip-path /var/run/usbipd-win/usbip >"$LOG" 2>&1 &
+disown
+sleep 1
+echo "resumed: auto-attach watcher for busid $BUSID (host ip $HOST_IP), logging to $LOG"

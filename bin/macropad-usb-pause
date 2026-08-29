@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Stops the WSL-side usbip-auto-attach watcher so the MacroPad can be
+# detached from Windows long enough to do a native (non-tunneled) file
+# copy to the CIRCUITPY drive -- see docs/troubleshooting.md for why this
+# is necessary (mass-storage writes tunneled through usbipd-win into WSL
+# are not reliable for this device).
+#
+# Only stops the watcher; it does NOT detach the device that's already
+# attached. Run `usbipd detach --busid <busid>` on the Windows side next.
+#
+# Installed with a NOPASSWD sudoers rule (see docs/troubleshooting.md) so
+# it can be run without a password prompt: `sudo macropad-usb-pause`.
+set -euo pipefail
+
+if pgrep -f 'usbip-auto-attach' >/dev/null 2>&1; then
+    pkill -f 'usbip-auto-attach'
+    echo "paused: auto-attach watcher stopped"
+else
+    echo "already paused: no auto-attach watcher was running"
+fi

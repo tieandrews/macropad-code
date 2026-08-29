@@ -1,0 +1,77 @@
+# =============================================================================
+# usage.yaml -- local Claude Code usage display on the MacroPad's OLED
+# =============================================================================
+# See docs/customization.md for the full writeup. Short version: there's no
+# official Anthropic API for your exact session/weekly plan quota, so this
+# file lets you pick between three ways of showing usage on the OLED, in
+# increasing order of accuracy AND fragility/overhead:
+#
+#   local_estimate  (default) -- always works, zero extra setup. Sums
+#                    tokens from your own local Claude Code session
+#                    transcripts. Shows a raw count (e.g. "128.4K") unless
+#                    you set your own estimated budget below, in which
+#                    case it shows a % of that budget. Not the same as
+#                    Anthropic's real quota -- nobody outside Anthropic
+#                    publishes that number anywhere a script can read it.
+#
+#   claude_monitor   -- real Anthropic percentages, IF you already run the
+#                    community Claude-Code-Usage-Monitor tool
+#                    (github.com/Maciek-roboblog/Claude-Code-Usage-Monitor).
+#                    We don't maintain that tool; if its output format
+#                    ever doesn't match, this silently falls back to
+#                    local_estimate.
+#
+#   claude_pty       -- EXPERIMENTAL. Real Anthropic percentages by
+#                    periodically launching `claude` itself in the
+#                    background and reading its /usage panel. Heavier
+#                    (spawns a full process every poll) and more fragile
+#                    (scrapes UI text, not a stable API) than the other
+#                    two -- read macropad/usage_pty.py's module docstring
+#                    before enabling this. Requires `claude` to already be
+#                    logged in and the working directory below to already
+#                    be trusted (run `claude` there by hand once first).
+# =============================================================================
+
+enabled: true
+
+# local_estimate | claude_monitor | claude_pty
+source: claude_pty
+
+# How often (seconds) the bridge recomputes usage and refreshes the OLED.
+# 60s is fine for local_estimate/claude_monitor. If you switch to
+# claude_pty, use something much longer (300-900s) -- it launches a real
+# `claude` process every tick.
+poll_interval_seconds: 600
+
+# Rolling windows to sum tokens over (local_estimate only). 5h mirrors
+# Claude's session-limit window; 7d mirrors the weekly window.
+session_window_hours: 5
+weekly_window_days: 7
+
+# Optional (local_estimate only): your own estimated token budgets, if
+# you'd rather see a percentage bar than a raw count. Leave both `null`
+# to just show raw counts. These are NOT official Anthropic numbers --
+# just whatever you've personally calibrated from experience.
+session_token_budget: null
+weekly_token_budget: null
+
+# Used when source: claude_monitor
+claude_monitor:
+  # Defaults to ~/.claude-monitor/state/latest.json if left null.
+  state_path: null
+
+# Used when source: claude_pty
+claude_pty:
+  # Absolute path, not just "claude" -- systemd --user services run with a
+  # minimal PATH that doesn't include tool-manager install dirs (linuxbrew,
+  # nvm, etc.), so a bare "claude" fails to spawn silently (get_usage_
+  # percentages never raises) and this source falls back to local_estimate
+  # every single poll. Find yours with `which claude`.
+  claude_command: "/Users/tya/.local/bin/claude"
+  # Directory to launch `claude` in. Must already be trusted (and claude
+  # already logged in) -- run `claude` here by hand once first, or this
+  # will just detect the wizard/login/trust screen and give up cleanly
+  # every time. Defaults to your home directory if left null.
+  working_dir: /Users/tya/projects_tmp/macropad-code
+  # Total budget (seconds) for the whole launch-and-read cycle.
+  timeout_seconds: 20
