@@ -67,14 +67,11 @@ claude_pty:
   # nvm, etc.), so a bare "claude" fails to spawn silently (get_usage_
   # percentages never raises) and this source falls back to local_estimate
   # every single poll. Find yours with `which claude`.
-  claude_command: "/home/linuxbrew/.linuxbrew/bin/claude"
+  claude_command: "/Users/tya/.local/bin/claude"
   # Directory to launch `claude` in. Must already be trusted (and claude
   # already logged in) -- run `claude` here by hand once first, or this
   # will just detect the wizard/login/trust screen and give up cleanly
   # every time. Defaults to your home directory if left null.
-  # NOTE: your home directory ($HOME) is NOT currently trusted by this
-  # Claude install (check with `claude` -> the trust prompt appears), so
-  # working_dir is pinned to an already-trusted project instead.
-  working_dir: /home/tieandrews/wsl-projects/personal/emexams-remix
+  working_dir: /Users/tya/projects_tmp/macropad-code
   # Total budget (seconds) for the whole launch-and-read cycle.
   timeout_seconds: 20

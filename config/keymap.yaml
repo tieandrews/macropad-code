@@ -23,17 +23,17 @@ keys:
   0:
     label: macropad-code
     agent: claude
-    project_path: /home/tieandrews/wsl-projects/personal/macropad-code
+    project_path: /Users/tya/projects_tmp/macropad-code
     permission_mode: bypassPermissions
   1:
     label: emexams-remix
     agent: claude
-    project_path: /home/tieandrews/wsl-projects/personal/emexams-remix
+    project_path: /Users/tya/projects_tmp/emexams-remix
     permission_mode: auto
   2:
     label: emexams-website
     agent: claude
-    project_path: /home/tieandrews/wsl-projects/personal/emexams-website
+    project_path: /Users/tya/projects_tmp/emexams-website
 
 # Keys 3-5 are intentionally left unconfigured -- their LEDs stay off
 # (including while selected/pulsing) until you add an entry here.
