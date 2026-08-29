@@ -396,12 +396,15 @@ class Bridge:
 
     def _start_voice(self, trigger: str) -> bool:
         from . import voice
-        from .stt import create_backend
 
         try:
+            from .stt import create_backend
+
             self._stt = create_backend(self._voice_settings)
         except Exception as exc:
-            print(f"[macropad-bridge] voice backend setup failed: {exc}", flush=True)
+            hint = (" -- run `uv sync --extra voice` to install its dependencies"
+                    if isinstance(exc, ImportError) else "")
+            print(f"[macropad-bridge] voice backend setup failed: {exc}{hint}", flush=True)
             self._stt = None
             return False
 

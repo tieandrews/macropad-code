@@ -11,10 +11,11 @@ See config/bridge.yaml `voice:` and docs/customization.md. Backends:
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
-from .base import DeltaCallback, STTBackend, TranscriptCallback
-from .factory import create_backend
+if TYPE_CHECKING:
+    from .base import DeltaCallback, STTBackend, TranscriptCallback
+    from .factory import create_backend
 
 __all__ = [
     "STTBackend",
@@ -22,3 +23,22 @@ __all__ = [
     "TranscriptCallback",
     "create_backend",
 ]
+
+
+def __getattr__(name: str):
+    """Lazily imports .base/.factory on first access instead of at
+    package-import time. Those modules (transitively) need the `voice`
+    extra's heavy deps (numpy, openai, together, faster-whisper, ...),
+    which aren't installed by default -- eagerly importing them here
+    would break anything that merely imports something else from this
+    package (e.g. bridge.py's `from .stt.env import load_dotenv_once`,
+    needed on every startup regardless of whether voice is enabled)."""
+    if name == "create_backend":
+        from .factory import create_backend
+
+        return create_backend
+    if name in ("STTBackend", "DeltaCallback", "TranscriptCallback"):
+        from . import base
+
+        return getattr(base, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
