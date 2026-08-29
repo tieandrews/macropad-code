@@ -81,6 +81,18 @@ keys:
 #     is pending review (see config/bridge.yaml's voice.auto_enter).
 #     Configure backend/timing in config/bridge.yaml and .env.
 #
+# `color`/`brightness` (optional, any type except voice_toggle -- that
+# one's LED is entirely host-driven): gives the key its own static LED
+# color, e.g. so Approve/Deny/etc are visually distinct at a glance
+# instead of all staying dark. `color: [r, g, b]` (0-255 each).
+# `brightness` (0.0-1.0) scales it before sending to the board and
+# defaults to colors.yaml's global `brightness` if omitted -- set it
+# per-key to make one action deliberately dimmer/brighter than the
+# rest, e.g. a subtle low-light Approve next to a normal-brightness
+# Deny. A key with no `color` set just stays off, as before. Takes
+# effect immediately on the next bridge (re)start, the `type: resync`
+# action key, or the web UI's "Apply to pad".
+#
 # Left commented out by default -- nothing fires into a live agent
 # session until you explicitly configure it. Some starting ideas:
 #
@@ -88,9 +100,12 @@ keys:
 #   6:
 #     label: Approve
 #     send_keys: "y"
+#     color: [0, 200, 0]     # subtle, low-light green
+#     brightness: 0.12
 #   7:
 #     label: Deny
 #     send_keys: "n"
+#     color: [255, 0, 0]     # red
 #   8:
 #     label: Interrupt
 #     send_keys: "C-c"
@@ -102,17 +117,22 @@ keys:
 #     label: Switch model
 #     type: cycle_model
 #     models: [sonnet, opus, haiku]
+#     color: [255, 255, 255] # white
 #   11:
 #     label: New chat
 #     send_keys: "/clear"
+#     color: [255, 140, 0]   # orange
     permission_mode: bypassPermissions
 actions:
   6:
     label: Approve
     send_keys: "y"
+    color: [0, 200, 0] # subtle, low-light green
+    brightness: 0.12
   7:
     label: Deny
     send_keys: "n"
+    color: [255, 0, 0] # red
   8:
     label: Resync
     type: resync
@@ -123,10 +143,12 @@ actions:
       - sonnet
       - opus
       - haiku
+    color: [255, 255, 255] # white
   10:
     label: Clear Session
     send_keys: /clear
     enter: true
+    color: [255, 140, 0] # orange
   11:
     label: Mic Toggle
     type: voice_toggle

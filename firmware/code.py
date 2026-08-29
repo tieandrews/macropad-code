@@ -61,7 +61,14 @@
 #      session is currently selected -- see macropad/sessions.py and
 #      config/keymap.yaml's `actions:` section. Keys can still be given
 #      local HID macros via KEY_ACTIONS below, which takes priority over
-#      forwarding to the host.
+#      forwarding to the host. Unlike session keys, action keys have no
+#      dynamic status of their own, but they can still be given a static
+#      LED color via the same {"key", "color", "pulse"} message (see job
+#      1) -- config/keymap.yaml's `actions:` `color:`/`brightness:`
+#      fields, pushed by macropad/bridge.py's _push_action_key_colors().
+#      They render with no dimming/pulse/selection effects (those are
+#      session-key-only, see _render_key_leds below) -- just the flat
+#      color as sent.
 #
 #   6. The encoder's push-button, and whichever action key (if any) has
 #      `type: voice_toggle` in config/keymap.yaml (announced by the host

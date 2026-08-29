@@ -116,7 +116,37 @@ actions:
 
 **`type: resync` entries:**
 
-- Forces every session key's (0-5) LED to match reality right now, without needing to unplug the pad or restart the bridge -- see [Resyncing LEDs](#resyncing-leds) below for why this is ever needed.
+- Forces every session key's (0-5) LED to match reality right now, without needing to unplug the pad or restart the bridge -- see [Resyncing LEDs](#resyncing-leds) below for why this is ever needed. Also re-pushes every other action key's `color` (below), in case one was edited and the bridge hasn't been restarted since.
+
+**`color`/`brightness` (optional, any type except `voice_toggle`):**
+
+- Gives that action key its own static LED color, since action keys have no dynamic status of their own the way session keys do -- e.g. a green Approve, red Deny, white "switch model", orange "clear session":
+
+  ```yaml
+  actions:
+    6:
+      label: Approve
+      send_keys: "y"
+      color: [0, 200, 0]      # subtle, low-light green
+      brightness: 0.12
+    7:
+      label: Deny
+      send_keys: "n"
+      color: [255, 0, 0]      # red
+    9:
+      label: Switch model
+      type: cycle_model
+      models: [sonnet, opus, haiku]
+      color: [255, 255, 255]  # white
+    10:
+      label: Clear session
+      send_keys: "/clear"
+      color: [255, 140, 0]    # orange
+  ```
+- `color: [r, g, b]` (each 0-255). Leaving it unset leaves that key dark, exactly as before this existed -- fully backwards compatible.
+- `brightness` (0.0-1.0) scales the color before it's sent to the board. Defaults to `colors.yaml`'s global `brightness` if omitted, so action keys match the rest of the pad's overall dimness by default; override it per-key for something deliberately more subtle (like the low-light Approve above) or brighter.
+- `type: voice_toggle` ignores `color`/`brightness` -- that key's LED is entirely host-driven mic status (dim blue idle / bright blue recording / amber pending review), see below.
+- Takes effect on the next bridge (re)start, a `type: resync` action-key press, or the web UI's "Apply to pad" -- there's no need to unplug the pad.
 
 Pressing an action key with nothing configured for it, or while no tmux session is running for the currently selected key, is a silent no-op (logged by the bridge, never raised) -- same fire-and-forget philosophy as everywhere else in this repo.
 

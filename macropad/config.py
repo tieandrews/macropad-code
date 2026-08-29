@@ -113,3 +113,27 @@ def pulse_for_state(state: str) -> bool:
     states = colors.get("states", {})
     entry = states.get(state) or {}
     return bool(entry.get("pulse", False))
+
+
+def action_key_color(entry: dict) -> Optional[list]:
+    """Resolves an action key's (keymap.yaml `actions:` entry) configured
+    `color`/`brightness` into a final [r, g, b] to push to the board, the
+    same way `color_for_state` does for session keys. Returns None if the
+    entry has no `color` set -- the key's LED then just stays off, same
+    as before this existed (fully backwards compatible with existing
+    keymap.yaml files).
+
+    `brightness` (0.0-1.0) is per-action and optional; falls back to
+    colors.yaml's global `brightness` so action keys default to the same
+    overall dimness as the status-color grid, but can be tuned
+    individually (e.g. a deliberately subtle/low-light Approve key next
+    to a normal-brightness Deny key)."""
+    color = entry.get("color")
+    if not color:
+        return None
+    r, g, b = color
+    brightness = entry.get("brightness")
+    if brightness is None:
+        brightness = load_colors().get("brightness", 1.0)
+    brightness = max(0.0, min(1.0, float(brightness)))
+    return [round(r * brightness), round(g * brightness), round(b * brightness)]

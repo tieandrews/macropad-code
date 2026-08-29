@@ -144,6 +144,36 @@ class Bridge:
               f"pulse={pulse} -> {status}", flush=True)
         return ok
 
+    def _push_action_key_colors(self) -> None:
+        """Pushes each action key's (6-11) own static LED color, from
+        keymap.yaml's `actions:` entries -- e.g. a subtle green Approve
+        key, red Deny, etc. Unlike session keys (0-5), action keys have
+        no dynamic status of their own, so there's nothing else that
+        would ever push a color for them; this has to be called
+        explicitly (startup, config reload, and the `type: resync`
+        action) rather than happening as a side effect of some other
+        event. A key with no `color` configured is left untouched (it
+        just stays off, as it always has). A `type: voice_toggle` key's
+        LED is entirely host/firmware-driven (see _push_mic_led) and
+        ignores whatever static color is pushed here -- see firmware/
+        code.py's _render_key_leds -- so it's harmless to still push one
+        if it has a `color` set, but there's no need to bother."""
+        actions = config.load_keymap().get("actions") or {}
+        pushed = 0
+        for key_str, entry in actions.items():
+            entry = entry or {}
+            if entry.get("type") == "voice_toggle":
+                continue
+            color = config.action_key_color(entry)
+            if color is None:
+                continue
+            key = int(key_str)
+            payload = json.dumps({"key": key, "color": color, "pulse": False})
+            if self.link.write_line(payload):
+                pushed += 1
+        if pushed:
+            print(f"[macropad-bridge] pushed {pushed} action key LED color(s)", flush=True)
+
     def _reload_config(self) -> None:
         """Re-reads config/bridge.yaml's `voice`/`encoder` settings into
         the running bridge -- everything else (colors.yaml, keymap.yaml)
@@ -156,7 +186,10 @@ class Bridge:
         against the freshly-loaded colors.yaml, so keys already lit
         before the edit visually update immediately -- otherwise a color
         change wouldn't show up on an already-lit key until its next
-        unrelated hook event, which could be arbitrarily far off."""
+        unrelated hook event, which could be arbitrarily far off. Action
+        keys (6-11) get the same treatment via _push_action_key_colors --
+        nothing else would ever re-push their static color after an
+        edit."""
         settings = config.load_bridge_settings()
         self._voice_settings = settings.get("voice", {})
         encoder_settings = settings.get("encoder", {}) or {}
@@ -166,6 +199,7 @@ class Bridge:
         self._push_voice_key()  # keymap.yaml's voice_toggle key may have changed too
         for key, state in self._key_states.items():
             self._push_key_state(key, state)
+        self._push_action_key_colors()
         print(f"[macropad-bridge] config reloaded (voice + encoder settings, "
               f"{len(self._key_states)} key LED(s) refreshed)", flush=True)
 
@@ -267,6 +301,7 @@ class Bridge:
 
         if entry.get("type") == "resync":
             self._resync_session_leds(force=True)
+            self._push_action_key_colors()
             print(f"[macropad-bridge] action='{label}' -> resynced all session key LEDs",
                   flush=True)
             return
@@ -784,6 +819,7 @@ class Bridge:
         self._push_voice_key()
         self._push_mic_led()
         self._resync_session_leds()
+        self._push_action_key_colors()
         from . import sessions
 
         sessions.sync_follow_session(self._selected_key)
