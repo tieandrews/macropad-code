@@ -197,7 +197,13 @@ class RealtimeWebSocketBackend:
                 ws.close()
             except Exception:
                 pass
-        if self._recv_thread is not None:
+        # _handle_event() (called from _recv_loop, i.e. from
+        # _recv_thread itself) calls close() on an "error" event (e.g.
+        # OpenAI's 60-minute realtime session cap) -- joining your own
+        # thread raises "RuntimeError: cannot join current thread" and
+        # kills _recv_thread with an uncaught traceback. Guard against
+        # that; a thread can't usefully wait on itself anyway.
+        if self._recv_thread is not None and self._recv_thread is not threading.current_thread():
             self._recv_thread.join(timeout=1)
             self._recv_thread = None
 
