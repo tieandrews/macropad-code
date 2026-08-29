@@ -42,6 +42,11 @@ voice:
   # key's LED (if configured) turns amber while a transcript is pending.
   auto_enter: true
 
+  # Safety net for hands-free recording (a quick tap, or an errant
+  # button press): auto-stops and transcribes after this many seconds
+  # even if nothing ever taps the mic again. Set to 0/null to disable.
+  max_recording_seconds: 600
+
   # Backend (pick one):
   #   local_whisper       offline faster-whisper (slow on CPU, no API key)
   #   openai_whisper      OpenAI whisper-1 batch (~$0.006/min)

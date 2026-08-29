@@ -151,6 +151,7 @@ Hold-and-release the rotary encoder (if `voice.triggers.encoder: true`) or an ac
 - **Release before `voice.hold_threshold_ms`** (default 300ms -- a "tap"): recording keeps running hands-free. The *next* press on the same control stops it (tap-to-toggle).
 - **Release at or after the threshold** (a "hold"): stops recording right there -- push-to-talk.
 - If a transcript is sitting **pending review** (see `auto_enter` below), the next press submits it instead of starting a new recording.
+- Hands-free recording auto-stops after `voice.max_recording_seconds` (default 600s/10min) even if nothing taps the mic again -- a safety net against an errant press leaving it recording indefinitely. Set to `0`/`null` to disable.
 
 **Reviewing before it's sent** (`voice.auto_enter: false`): by default (`true`) stopping recording sends the transcript and an `Enter` immediately, same as before. Set it `false` and the transcript is typed into the session's input box *without* Enter, so you can read it, fix a misheard word, or delete it entirely, then tap the mic control again to submit (send Enter) once you're happy with it. The mic key's LED (if you've assigned one via `type: voice_toggle`) turns amber while a transcript is pending, so it's visually obvious you still need to confirm.
 
@@ -185,6 +186,7 @@ voice:
   enabled: true
   hold_threshold_ms: 300   # below this = tap-to-toggle, at/above = push-to-talk
   auto_enter: true          # false = type transcript, wait for a confirm tap
+  max_recording_seconds: 600 # safety net -- auto-stops hands-free recording after this long; 0/null disables
   backend: openai_realtime
   openai:
     api_key_env: OPENAI_API_KEY

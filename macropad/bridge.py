@@ -95,6 +95,16 @@ class Bridge:
         # sitting in the pane; the next press submits it (sends Enter).
         self._voice_state = "idle"
         self._voice_pending_session_key: int | None = None
+        # Safety net for hands-free recording (config: voice.
+        # max_recording_seconds) -- a quick tap arms hands-free
+        # recording until a later tap stops it, so an errant button
+        # press (or just forgetting) could otherwise leave the mic
+        # recording indefinitely. This timer force-stops it after a
+        # bounded duration regardless. Guarded by _voice_recording_id
+        # so a timer from a *previous* recording can't stop a new one
+        # that happened to start again before the old timer fired.
+        self._voice_timeout_timer: threading.Timer | None = None
+        self._voice_recording_id = 0
         self._model_index: dict[int, int] = {}  # session key -> cycle_model position
         self._effort_index: dict[int, int] = {}  # session key -> cycle_effort position
         self._last_sent_effort: dict[int, str] = {}  # session key -> last /effort level sent
@@ -333,6 +343,11 @@ class Bridge:
     # config/bridge.yaml's voice.hold_threshold_ms.
     DEFAULT_HOLD_THRESHOLD_MS = 300
 
+    # Fallback if voice.max_recording_seconds isn't set in bridge.yaml
+    # at all (existing configs from before this existed) -- still gets
+    # a safety net rather than none. 0/null in config disables it.
+    DEFAULT_MAX_RECORDING_SECONDS = 600
+
     def _on_voice_press(self, trigger: str) -> None:
         if not self._voice_settings.get("enabled", False):
             print("[macropad-bridge] voice press but voice input is disabled -- set "
@@ -466,14 +481,45 @@ class Bridge:
         self._recorder = recorder
         self._recording = True
         self._voice_pending_session_key = self._selected_key
+        self._voice_recording_id += 1
+        self._arm_voice_timeout(self._voice_recording_id)
         self._push_mic_led()
         print(f"[macropad-bridge] voice recording started ({trigger}, backend={backend})",
               flush=True)
         return True
 
+    def _arm_voice_timeout(self, recording_id: int) -> None:
+        max_seconds = self._voice_settings.get("max_recording_seconds",
+                                                 self.DEFAULT_MAX_RECORDING_SECONDS)
+        if not max_seconds or max_seconds <= 0:
+            return
+        timer = threading.Timer(max_seconds, self._on_voice_timeout, args=(recording_id,))
+        timer.daemon = True
+        self._voice_timeout_timer = timer
+        timer.start()
+
+    def _cancel_voice_timeout(self) -> None:
+        timer, self._voice_timeout_timer = self._voice_timeout_timer, None
+        if timer is not None:
+            timer.cancel()
+
+    def _on_voice_timeout(self, recording_id: int) -> None:
+        # The timer that just fired belonged to whichever recording was
+        # active `max_recording_seconds` ago -- if a stop+restart
+        # happened in the meantime, recording_id has since moved on and
+        # this is stale; ignore it rather than stopping the new one.
+        if not self._recording or recording_id != self._voice_recording_id:
+            return
+        max_seconds = self._voice_settings.get("max_recording_seconds",
+                                                 self.DEFAULT_MAX_RECORDING_SECONDS)
+        print(f"[macropad-bridge] voice recording hit max duration "
+              f"({max_seconds}s) -- auto-stopping", flush=True)
+        self._stop_voice(f"max duration {max_seconds}s reached")
+
     def _stop_voice(self, trigger: str) -> None:
         from . import sessions, voice
 
+        self._cancel_voice_timeout()
         self._recording = False
         recorder, self._recorder = self._recorder, None
         stt, self._stt = self._stt, None
