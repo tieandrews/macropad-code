@@ -348,8 +348,9 @@ def main() -> None:
     print("  4. Optional: rotate the encoder to select a session and use the bottom two rows "
           "of keys (6-11) to send input into it (including switching models). Configure what "
           "each one sends in config/keymap.yaml's `actions:` section, then run "
-          "`uv run macropad-sessions` (needs tmux installed) to start each session in its own "
-          "tmux pane -- see docs/customization.md for the full setup.")
+          "`uv run macropad-sessions` (needs tmux installed, or herdr if you set "
+          "config/bridge.yaml's `session_backend: herdr`) to start each session in its own "
+          "pane -- see docs/customization.md for the full setup.")
     print("  5. Optional: press the encoder itself to speak a command instead of typing it -- "
           "set voice.enabled: true in config/bridge.yaml (needs `uv sync --extra voice` and a "
           "reachable microphone). See docs/customization.md.")

@@ -684,7 +684,7 @@ $('sessionModalSave').addEventListener('click', () => {
   delete keys[String(keyNum)];
   if (!projectPath) {
     // No project path -- leave this key unassigned, same as never
-    // having configured it (LED stays dark, no tmux session to start).
+    // having configured it (LED stays dark, no session to start).
     delete keys[keyNum];
   } else {
     const entry = {

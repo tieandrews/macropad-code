@@ -1,16 +1,24 @@
 """Starts each configured "session key" (config/keymap.yaml's `keys:`,
-indices 0-5) inside a dedicated tmux session, and lets the bridge route
-"action key" presses (indices 6-11) into whichever one is currently
+indices 0-5) inside a dedicated multiplexer session, and lets the bridge
+route "action key" presses (indices 6-11) into whichever one is currently
 selected on the MacroPad.
 
-Why tmux: the physical MacroPad has no idea which terminal window or tab
-you're looking at, and there is no cross-platform, reliable way to focus
-"the right" window before sending a keystroke -- window-focus automation
-is fragile and different on every OS/window manager. tmux sidesteps that
-entirely: `tmux send-keys` injects text directly into a named session's
-pane regardless of what's on screen, identically on Windows/WSL/Linux/
-macOS. The cost is real: your agent sessions need to actually run inside
-these tmux sessions for this to work at all -- see docs/customization.md.
+Why a multiplexer at all: the physical MacroPad has no idea which
+terminal window or tab you're looking at, and there is no cross-platform,
+reliable way to focus "the right" window before sending a keystroke --
+window-focus automation is fragile and different on every OS/window
+manager. A multiplexer sidesteps that entirely: it injects text directly
+into a named session's pane regardless of what's on screen. The cost is
+real: your agent sessions need to actually run inside these sessions for
+this to work at all -- see docs/customization.md.
+
+Which multiplexer is used is a runtime choice -- config/bridge.yaml's
+`session_backend` (tmux or herdr) -- implemented by the two modules under
+macropad/session_backends/. This module holds the public API shared by
+both (start_session, send_to_session, detect_model, etc.) plus everything
+that's genuinely backend-independent (transcript-based model detection,
+git branch detection); see session_backends/tmux.py and
+session_backends/herdr.py for what each backend actually does.
 
 For Claude Code specifically, each session is started with `claude
 --remote-control`, so you can also review/steer it from claude.ai/code or
@@ -24,22 +32,18 @@ from __future__ import annotations
 import json
 import re
 import shlex
-import subprocess
 from pathlib import Path
 from typing import Optional
 
 from . import config
-
-SESSION_PREFIX = "macropad-key"
-SESSION_KEY_COUNT = 6  # keys 0-5 -- must match firmware/code.py
-
-# A dedicated tmux session whose single window is kept re-pointed (via
-# `link-window`) at whichever session key is currently selected on the
-# MacroPad. Attach to it once (`macropad-sessions --follow`) and leave it
-# attached in a spare terminal/pane -- it live-updates as you rotate the
-# encoder, no repeated manual `tmux attach`/detach needed. See
-# sync_follow_session() below.
-FOLLOW_SESSION = "macropad-follow"
+from .session_backends import (
+    SESSION_KEY_COUNT,
+    SESSION_PREFIX,
+    VALID_SESSION_BACKENDS,
+    DEFAULT_SESSION_BACKEND,
+    get_backend,
+    session_name,
+)
 
 # Matches Claude Code's own model names as they appear in its status line
 # / welcome banner, e.g. "Opus 4.8", "Sonnet 4.5", "Haiku 4.5". Best-effort
@@ -100,7 +104,7 @@ def detect_model_from_transcript(project_path: str) -> Optional[str]:
     """Best-effort: reads the most recent assistant turn's `model` field
     straight from Claude Code's own local transcript for `project_path`
     (same ~/.claude/projects/ store macropad/usage.py reads), instead of
-    screen-scraping the tmux pane like detect_model() historically did.
+    screen-scraping the session pane like detect_model() historically did.
     This is the primary/preferred path now -- see _MODEL_RE's comment
     above for why the pane-scrape alone stopped being reliable. Returns
     None if there's no transcript directory/file for this project, or
@@ -137,28 +141,19 @@ def detect_model_from_transcript(project_path: str) -> Optional[str]:
     return None
 
 
-def session_name(key: int) -> str:
-    return f"{SESSION_PREFIX}{key}"
+def _backend_name() -> str:
+    settings = config.load_bridge_settings()
+    name = settings.get("session_backend", DEFAULT_SESSION_BACKEND)
+    if name not in VALID_SESSION_BACKENDS:
+        raise SystemExit(
+            f"[macropad-sessions] unknown session_backend {name!r} in "
+            f"config/bridge.yaml -- expected one of {', '.join(VALID_SESSION_BACKENDS)}."
+        )
+    return name
 
 
-def _tmux(*args: str) -> Optional[subprocess.CompletedProcess]:
-    try:
-        return subprocess.run(["tmux", *args], capture_output=True, text=True)
-    except FileNotFoundError:
-        return None
-
-
-def tmux_available() -> bool:
-    return _tmux("-V") is not None
-
-
-def _has_named_session(name: str) -> bool:
-    result = _tmux("has-session", "-t", name)
-    return result is not None and result.returncode == 0
-
-
-def has_session(key: int) -> bool:
-    return _has_named_session(session_name(key))
+def _backend():
+    return get_backend(_backend_name())
 
 
 VALID_PERMISSION_MODES = {"manual", "auto", "bypassPermissions"}
@@ -182,8 +177,8 @@ def _launch_command(entry: dict, label: str) -> str:
         print(
             "[macropad-sessions] note: Codex CLI has no equivalent of "
             "Claude Code's Remote Control yet -- starting a plain `codex` "
-            "session in tmux. You can still use action keys to send it "
-            "keystrokes, just not review it remotely.",
+            "session. You can still use action keys to send it keystrokes, "
+            "just not review it remotely.",
             flush=True,
         )
         return "codex"
@@ -191,11 +186,12 @@ def _launch_command(entry: dict, label: str) -> str:
 
 
 def start_session(key: int, entry: dict) -> bool:
-    """Creates the tmux session for `key` (a keymap.yaml `keys:` entry)
-    and launches its agent inside it, if not already running. Returns
-    True if a session is running afterwards (whether newly started or
-    already up), False on failure (no project_path, tmux missing, or
-    tmux itself errored).
+    """Creates the session for `key` (a keymap.yaml `keys:` entry) and
+    launches its agent inside it, if not already running, using whichever
+    session_backend config/bridge.yaml selects. Returns True if a session
+    is running afterwards (whether newly started or already up), False on
+    failure (no project_path, the backend's CLI missing, or the backend
+    itself errored).
 
     Either way, pushes an initial "waiting" LED color for the key so it
     lights up immediately rather than staying dark until the agent's
@@ -207,7 +203,8 @@ def start_session(key: int, entry: dict) -> bool:
     across a reboot."""
     from . import client
 
-    if has_session(key):
+    backend = _backend()
+    if backend.has_session(key):
         client.send_state(key, "waiting")
         return True
 
@@ -217,23 +214,11 @@ def start_session(key: int, entry: dict) -> bool:
         return False
     cwd = str(Path(project_path).expanduser())
 
-    name = session_name(key)
-    created = _tmux("new-session", "-d", "-s", name, "-c", cwd)
-    if created is None:
-        print("[macropad-sessions] tmux is not installed or not on PATH", flush=True)
-        return False
-    if created.returncode != 0:
-        print(
-            f"[macropad-sessions] failed to create tmux session {name}: "
-            f"{created.stderr.strip()}",
-            flush=True,
-        )
-        return False
-
-    label = entry.get("label", name)
+    label = entry.get("label", session_name(key))
     command = _launch_command(entry, label)
-    _tmux("send-keys", "-t", name, command, "Enter")
-    print(f"[macropad-sessions] started {name} ({label}) in {cwd} -- running: {command}", flush=True)
+    if not backend.start(key, cwd, command, label):
+        return False
+    print(f"[macropad-sessions] started {session_name(key)} ({label}) in {cwd} -- running: {command}", flush=True)
     client.send_state(key, "waiting")
     return True
 
@@ -253,37 +238,24 @@ def start_all() -> None:
         start_session(key, keys[key])
 
 
+def has_session(key: int) -> bool:
+    return _backend().has_session(key)
+
+
 def send_to_session(key: int, text: str, send_enter: bool = True) -> bool:
-    """Best-effort: injects `text` into the tmux session for `key`.
-    Returns False (never raises) if that session isn't running, tmux
-    isn't available, or both `text` is empty and `send_enter` is False --
-    callers treat this the same as any other "nothing configured/running yet"
-    no-op."""
-    if not (0 <= key < SESSION_KEY_COUNT):
-        return False
-    if not text and not send_enter:
-        return False
-    if not has_session(key):
-        return False
-    args = ["send-keys", "-t", session_name(key)]
-    if text:
-        args.append(text)
-    if send_enter:
-        args.append("Enter")
-    result = _tmux(*args)
-    return result is not None and result.returncode == 0
+    """Best-effort: injects `text` into the selected session_backend's
+    session for `key`. Returns False (never raises) if that session isn't
+    running, the backend isn't available, or both `text` is empty and
+    `send_enter` is False -- callers treat this the same as any other
+    "nothing configured/running yet" no-op."""
+    return _backend().send_to_session(key, text, send_enter)
 
 
 def capture_pane(key: int) -> Optional[str]:
-    """Best-effort snapshot of key's tmux pane as plain text (current
+    """Best-effort snapshot of key's session pane as plain text (current
     screen contents, not full scrollback). Returns None if that session
-    isn't running or tmux isn't available."""
-    if not has_session(key):
-        return None
-    result = _tmux("capture-pane", "-t", session_name(key), "-p")
-    if result is None or result.returncode != 0:
-        return None
-    return result.stdout
+    isn't running or the backend isn't available."""
+    return _backend().capture_pane(key)
 
 
 def detect_model(key: int) -> Optional[str]:
@@ -291,7 +263,7 @@ def detect_model(key: int) -> Optional[str]:
     (e.g. "Sonnet 4.5"). Tries detect_model_from_transcript() first
     (reads it straight from Claude Code's own local transcript for that
     key's project_path -- reliable regardless of what's currently on
-    screen), falling back to scraping the tmux pane for agents with no
+    screen), falling back to scraping the session pane for agents with no
     local transcript store of their own (Codex CLI) or if the transcript
     lookup comes up empty for any reason. Returns None if neither works
     -- never raises.
@@ -312,7 +284,7 @@ def detect_model(key: int) -> Optional[str]:
     text = capture_pane(key)
     if not text:
         return None
-    # tmux pads captures to the pane's full height with blank lines, so
+    # Pane reads are padded to the pane's full height with blank lines, so
     # trim trailing blanks first -- otherwise "last few lines" would
     # usually just be empty padding rather than the status line.
     lines = text.splitlines()
@@ -332,7 +304,7 @@ def detect_model(key: int) -> Optional[str]:
 def detect_branch(key: int) -> Optional[str]:
     """Best-effort: the current git branch of `key`'s configured
     project_path, via `git branch --show-current` -- unlike
-    detect_model() this doesn't scrape the tmux pane at all, it just
+    detect_model() this doesn't scrape the session pane at all, it just
     asks git directly, so it works regardless of what Claude Code's UI
     happens to be showing at that instant. Returns None if the key has
     no project_path configured, the path isn't a git repo, or git isn't
@@ -340,6 +312,8 @@ def detect_branch(key: int) -> Optional[str]:
     to a checked-out branch (detached HEAD) also returns None, since
     --show-current is intentionally blank in that case rather than
     printing a commit hash. Never raises."""
+    import subprocess
+
     keys = config.load_keymap().get("keys") or {}
     entry = keys.get(key) or keys.get(str(key))
     project_path = (entry or {}).get("project_path")
@@ -395,47 +369,29 @@ def confirm_model_switch_if_pending(key: int) -> bool:
 
 
 def attach(key: int) -> None:
-    """Replaces the current process with `tmux attach` to key's session --
+    """Replaces the current process with an attach into key's session --
     for manually reviewing/typing in a session from any terminal."""
-    import os
-
-    name = session_name(key)
-    if not has_session(key):
-        raise SystemExit(f"No tmux session {name} running -- run `macropad-sessions` first.")
-    os.execvp("tmux", ["tmux", "attach", "-t", name])
+    _backend().attach(key)
 
 
 def sync_follow_session(key: int) -> bool:
-    """Re-points FOLLOW_SESSION's one window at `key`'s session via `tmux
-    link-window`, so anything already attached to FOLLOW_SESSION
-    immediately starts showing the newly-selected session -- no
-    detach/reattach needed. Called by the bridge every time the encoder
-    selection changes (see bridge.py's _on_board_line). Safe to call even
-    if nothing's attached to FOLLOW_SESSION (or it doesn't exist yet --
-    it's created on first use) -- this is just bookkeeping either way.
-    Returns False (never raises) if `key` has no running session, or if
-    tmux itself isn't available."""
-    if not has_session(key):
-        return False
-    if not _has_named_session(FOLLOW_SESSION):
-        created = _tmux("new-session", "-d", "-s", FOLLOW_SESSION)
-        if created is None or created.returncode != 0:
-            return False
-    result = _tmux("link-window", "-k", "-s", f"{session_name(key)}:0", "-t", f"{FOLLOW_SESSION}:0")
-    return result is not None and result.returncode == 0
+    """Re-points the shared "follow" view at `key`'s session, so anything
+    already attached to it immediately starts showing the newly-selected
+    session -- no detach/reattach needed. Called by the bridge every time
+    the encoder selection changes (see bridge.py's _on_board_line). Safe
+    to call even if nothing's attached to the follow view. Returns False
+    (never raises) if `key` has no running session, or if the backend
+    itself isn't available."""
+    return _backend().sync_follow_session(key)
 
 
 def attach_follow() -> None:
-    """Replaces the current process with `tmux attach` to FOLLOW_SESSION
-    -- leave this running in a spare terminal/pane and it live-follows
-    whichever session key is currently selected on the MacroPad (as long
-    as `macropad-bridge` is running to keep calling sync_follow_session()
-    -- see docs/running-sessions.md)."""
-    import os
-
-    if not _has_named_session(FOLLOW_SESSION):
-        _tmux("new-session", "-d", "-s", FOLLOW_SESSION)
-    os.execvp("tmux", ["tmux", "attach", "-t", FOLLOW_SESSION])
+    """Replaces the current process with an attach into the shared follow
+    view -- leave this running in a spare terminal/pane and it
+    live-follows whichever session key is currently selected on the
+    MacroPad (as long as `macropad-bridge` is running to keep calling
+    sync_follow_session() -- see docs/running-sessions.md)."""
+    _backend().attach_follow()
 
 
 def main() -> None:
@@ -443,23 +399,26 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         description=(
-            "Start (or attach to) the tmux + `claude --remote-control` "
-            "sessions for each MacroPad session key (0-5) in config/keymap.yaml."
+            "Start (or attach to) the per-project agent sessions for each "
+            "MacroPad session key (0-5) in config/keymap.yaml, using "
+            "whichever session_backend config/bridge.yaml selects (tmux "
+            "or herdr)."
         )
     )
     parser.add_argument(
         "--attach",
         type=int,
         metavar="KEY",
-        help="Attach to an already-running session's tmux pane instead of starting sessions.",
+        help="Attach to an already-running session instead of starting sessions.",
     )
     parser.add_argument(
         "--follow",
         action="store_true",
         help=(
-            "Attach to the shared macropad-follow session instead of starting sessions -- "
-            "it live-follows whichever key is currently selected on the MacroPad, kept "
-            "in sync by macropad-bridge. Leave this attached in a spare terminal/pane."
+            "Attach to the shared follow view instead of starting sessions -- "
+            "it live-follows whichever key is currently selected on the MacroPad, "
+            "kept in sync by macropad-bridge. Leave this attached in a spare "
+            "terminal/pane."
         ),
     )
     args = parser.parse_args()
@@ -472,11 +431,12 @@ def main() -> None:
         attach_follow()
         return
 
-    if not tmux_available():
+    backend_name = _backend_name()
+    backend = get_backend(backend_name)
+    if not backend.available():
         raise SystemExit(
-            "tmux is not installed or not on PATH -- install it first "
-            "(e.g. `sudo apt install tmux`, `brew install tmux`; on Windows, "
-            "run this from WSL)."
+            f"[macropad-sessions] {backend_name} is not installed or not on "
+            f"PATH -- {backend.INSTALL_HINT}"
         )
     start_all()
 

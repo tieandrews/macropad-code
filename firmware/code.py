@@ -15,22 +15,29 @@
 #          {"voice_key": 8}                                   -> which action key (if any)
 #                                                                 is the mic control, or null
 #          {"mic_led": "idle"|"recording"|"pending_review"}  -> mic key's LED state, and
-#                                                                 the "*MIC*" marker on line 5
+#                                                                 the "*MIC*" marker on line 4
+#          {"request_selected": true}    -> re-send {"selected": N} right
+#                                            away (a (re)starting bridge has
+#                                            no other way to learn the
+#                                            board's current selection --
+#                                            see serial_link.py's on_connect)
 #
-#   2. Render the usage message on the built-in OLED as a compact
-#      two-line dashboard: one line per metric, each "<label> <bar> <pct>%".
+#   2. Render the usage message on the built-in OLED as a single line
+#      with both metrics together, no bars: "<label>: <pct>%  <label>: <pct>%".
 #
-#   3. Render a third status line: the selected session's model name and
+#   3. Render a second status line: the selected session's model name and
 #      effort level (from {"model": ...} / {"effort": ...} messages,
-#      shown together as "Sonnet 4.5 - high"). A fourth line shows the
+#      shown together as "Sonnet 4.5 - high"). A third line shows the
 #      selected session's project label (from a {"label": ...} message),
 #      so you can see which repo the knob is currently pointed at. A
-#      fifth, bottom line shows that session's current git branch (from
+#      fourth line shows that session's current git branch (from
 #      a {"branch": ...} message), with a "*MIC*" marker prefixed onto
 #      it while voice recording is active or a transcript is pending
 #      review (from {"mic_led": ...} -- see _render_branch_line()). The
 #      marker disappears once the mic goes idle, so the line spends most
-#      of its time just showing the branch.
+#      of its time just showing the branch. A fifth line's worth of
+#      space is left blank below it -- see the OLED usage dashboard
+#      section below.
 #
 #   4. Keys 0-5 (top two rows) are "session" keys -- their LEDs track agent
 #      state as before. Two effects, layered independently so they never
@@ -57,8 +64,9 @@
 #      still jump selection directly by pressing them, in either mode.
 #
 #   5. Keys 6-11 (bottom two rows) are "action" keys. Pressing one sends
-#      {"action": N} to the host, which routes it (via tmux) into whatever
-#      session is currently selected -- see macropad/sessions.py and
+#      {"action": N} to the host, which routes it (via tmux or herdr, see
+#      config/bridge.yaml's `session_backend`) into whatever session is
+#      currently selected -- see macropad/sessions.py and
 #      config/keymap.yaml's `actions:` section. Keys can still be given
 #      local HID macros via KEY_ACTIONS below, which takes priority over
 #      forwarding to the host. Unlike session keys, action keys have no
@@ -138,11 +146,8 @@ def _send_line(msg: dict) -> None:
 #
 # Built with raw displayio + adafruit_display_text rather than the
 # MacroPad library's display_text() helper, so the exact layout here is
-# fully under our control. Bars are drawn with plain ASCII ('#'/'.')
-# rather than block-drawing glyphs, since the built-in terminalio font
-# only covers ASCII.
+# fully under our control.
 
-BAR_WIDTH = 10
 LINE_HEIGHT = 11
 
 _display_group = displayio.Group()
@@ -152,33 +157,34 @@ if hasattr(macropad.display, "root_group"):
 else:
     macropad.display.show(_display_group)
 
-_usage_lines = []
-for _i in range(2):
-    _line = label.Label(
-        terminalio.FONT,
-        text="",
-        color=0xFFFFFF,
-        x=2,
-        y=6 + _i * LINE_HEIGHT,
-    )
-    _display_group.append(_line)
-    _usage_lines.append(_line)
+# First line: both usage metrics together (e.g. "5H 42%  7D 18%") -- see
+# _apply_usage_message() below. Second line: selected session's model
+# name -- see _apply_model_message() below. Third line: the selected
+# session's project label (which repo the knob is pointed at) -- see
+# _apply_label_message() below. Fourth line: the selected session's
+# current git branch, with a "*MIC*" marker prefixed onto it while voice
+# recording is active/pending review -- see _render_branch_line() below.
+# The label is often too long to share a line with the branch name
+# without running off the 128px-wide display, so the branch gets its own
+# line rather than being appended to the label line. That leaves one
+# line's worth of the display unused below the branch line -- left blank
+# rather than stretching the others out, so a future line has room
+# without re-laying everything out again.
+_usage_line = label.Label(
+    terminalio.FONT,
+    text="",
+    color=0xFFFFFF,
+    x=2,
+    y=6,
+)
+_display_group.append(_usage_line)
 
-# Third line: selected session's model name -- see _apply_model_message()
-# below. Fourth line: the selected session's project label (which repo
-# the knob is pointed at) -- see _apply_label_message() below. Fifth
-# line: the selected session's current git branch, with a "*MIC*" marker
-# prefixed onto it while voice recording is active/pending review --
-# see _render_branch_line() below. The label is often too long to share
-# a line with the branch name without running off the 128px-wide
-# display, so the branch gets its own line rather than being appended to
-# the label line.
 _status_line = label.Label(
     terminalio.FONT,
     text="",
     color=0xFFFFFF,
     x=2,
-    y=6 + 2 * LINE_HEIGHT,
+    y=6 + 1 * LINE_HEIGHT,
 )
 _display_group.append(_status_line)
 
@@ -187,7 +193,7 @@ _label_line = label.Label(
     text="",
     color=0x00CFFF,
     x=2,
-    y=6 + 3 * LINE_HEIGHT,
+    y=6 + 2 * LINE_HEIGHT,
 )
 _display_group.append(_label_line)
 
@@ -196,7 +202,7 @@ _branch_line = label.Label(
     text="",
     color=0xFFFFFF,
     x=2,
-    y=6 + 4 * LINE_HEIGHT,
+    y=6 + 3 * LINE_HEIGHT,
 )
 _display_group.append(_branch_line)
 
@@ -207,10 +213,10 @@ _current_effort = ""
 
 def _render_status_line() -> None:
     # Effort is appended to the same line as the model name (rather than
-    # a new line) since the OLED's 5 lines are already fully used --
-    # usage x2, model/effort, project label, mic status.
-    # terminalio.FONT only covers ASCII (see BAR_WIDTH comment above), so
-    # use a plain hyphen rather than a middle-dot separator.
+    # a new line) to leave the freed-up line (see the display layout
+    # comment above) blank instead of eating into it immediately.
+    # terminalio.FONT only covers ASCII, so use a plain hyphen rather
+    # than a middle-dot separator.
     if _current_model and _current_effort:
         _status_line.text = f"{_current_model} - {_current_effort}"
     else:
@@ -256,28 +262,30 @@ def _apply_branch_message(branch_name) -> None:
     _render_branch_line()
 
 
-def _render_bar(pct) -> str:
-    pct = max(0, min(100, pct))
-    filled = round(BAR_WIDTH * pct / 100)
-    return "[" + ("#" * filled) + ("." * (BAR_WIDTH - filled)) + "]" + f" {pct}%"
-
-
-def _render_metric_line(label_text: str, value: str, pct) -> str:
+def _render_metric(label_text: str, value: str, pct) -> str:
+    # A raw percentage (no bar) when we have one; falls back to whatever
+    # `value` the host sent otherwise -- a token count for the
+    # local-estimate source (see usage.py's _payload_from_local_estimate,
+    # config/usage.yaml's `source: claude_local`) with no budget
+    # configured to compute a percentage against, or "?" for the
+    # claude_pty source if it couldn't parse that particular metric out
+    # of the /usage panel this poll.
     if pct is not None:
-        return f"{label_text} {_render_bar(pct)}"
-    return f"{label_text} {value}"
+        return f"{label_text}:{pct}%"
+    return f"{label_text}:{value}"
 
 
 def _apply_usage_message(usage: dict) -> None:
     session = usage.get("session") or {}
     weekly = usage.get("weekly") or {}
 
-    _usage_lines[0].text = _render_metric_line(
+    session_part = _render_metric(
         session.get("label", "SESSION"), session.get("value", ""), session.get("pct")
     )
-    _usage_lines[1].text = _render_metric_line(
+    weekly_part = _render_metric(
         weekly.get("label", "WEEKLY"), weekly.get("value", ""), weekly.get("pct")
     )
+    _usage_line.text = f"{session_part}  {weekly_part}"
 
 
 # --- per-key LEDs -------------------------------------------------------
@@ -463,6 +471,14 @@ def _handle_message(raw_line: bytes) -> None:
     if not isinstance(msg, dict):
         return
 
+    if "request_selected" in msg:
+        # Sent by a (re)starting bridge that has no way to know the
+        # board's current selection otherwise -- we only ever send
+        # {"selected": N} on an actual rotation/press, never
+        # proactively. See serial_link.py's on_connect / bridge.py's
+        # _on_serial_connect().
+        _send_line({"selected": _selected_key})
+        return
     if "usage" in msg:
         _apply_usage_message(msg["usage"])
         return

@@ -110,14 +110,14 @@ print(usage_pty.get_usage_percentages(working_dir=None, timeout_seconds=20))
 
 ## The OLED's third line (model name) never shows anything
 
-1. Confirm a tmux session is actually running for whichever key is currently selected: `tmux has-session -t macropad-key0` (swap in the right key index) -- if that fails, run `uv run macropad-sessions` first.
+1. Confirm a session is actually running for whichever key is currently selected: `uv run python3 -c "from macropad import sessions; print(sessions.has_session(0))"` (swap in the right key index) -- if that's `False`, run `uv run macropad-sessions` first. (Or check the backend directly -- `tmux has-session -t macropad-key0`, or `herdr workspace list --session macropad`, depending on `config/bridge.yaml`'s `session_backend`.)
 2. Test detection directly:
 
    ```bash
    uv run python3 -c "from macropad import sessions; print(sessions.detect_model(0))"
    ```
 
-   `None` means either the session isn't running, or Claude Code's status line wasn't recognizable in the pane's last few lines (mid-redraw, a Codex CLI session which doesn't show a model name the same way, or wording that's changed since -- see `macropad/sessions.py`'s `_MODEL_RE`). Try `tmux capture-pane -t macropad-key0 -p` yourself and see what's actually there.
+   `None` means either the session isn't running, or Claude Code's status line wasn't recognizable in the pane's last few lines (mid-redraw, a Codex CLI session which doesn't show a model name the same way, or wording that's changed since -- see `macropad/sessions.py`'s `_MODEL_RE`). Try `uv run python3 -c "from macropad import sessions; print(sessions.capture_pane(0))"` yourself and see what's actually there.
 3. Rotating the encoder to reselect the same key forces an immediate re-check rather than waiting for the next `model_poll_interval_seconds` tick, if you want to rule out just needing to wait a few seconds.
 
 ## Voice input: encoder press does nothing / "voice input is disabled"
