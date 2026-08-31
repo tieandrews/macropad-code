@@ -5,7 +5,7 @@ Turn an [Adafruit MacroPad RP2040](https://www.adafruit.com/product/5128) into a
 The 12 keys split into two roles:
 
 - **Session keys (top two rows, 0-5)**: each one you assign to a project lights up with the state of the agent running there. Rotate the encoder to cycle which one is "selected" (its LED gets brighter), or just press the key you want directly -- e.g. spot one pulsing red and press it, no need to scroll over. Pulsing is reserved separately for statuses worth interrupting you for (`permission`, `error` by default), independent of selection.
-- **Action keys (bottom two rows, 6-11)**: send a configured bit of input -- approve, deny, `/usage`, switch models, whatever you like -- straight into whichever session is currently selected, via a `tmux` pane running that session. See [Action keys: steering a session](#action-keys-steering-a-session) below.
+- **Action keys (bottom two rows, 6-11)**: send a configured bit of input -- approve, deny, `/usage`, switch models, whatever you like -- straight into whichever session is currently selected, via a `tmux` or `herdr` pane running that session (your choice -- see [Action keys: steering a session](#action-keys-steering-a-session) below).
 - **The encoder itself**: press it to toggle voice-to-text -- speak a command and it's typed into the selected session for you, transcribed fully offline. See [Voice input](#voice-input) below.
 
 | State | Default color | Meaning |
@@ -38,7 +38,7 @@ rotate the encoder -> firmware brightens the selected session key's LED
                     -> tells the bridge which key (0-5) is selected
                     -> bridge pushes that key's model + repo label to the OLED
 press an action key -> bridge looks up what to send in config/keymap.yaml
-                     -> sends it into that session's tmux pane
+                     -> sends it into that session's pane
 ```
 
 See [docs/agent-integration.md](docs/agent-integration.md) for both wiring diagrams in full.
@@ -92,7 +92,7 @@ There's no official Anthropic API for your exact Pro/Max session/weekly quota, s
 
 Whichever you pick, a failure always falls back to `local_estimate` rather than showing nothing. Codex CLI has no local equivalent to any of these, so usage display is Claude Code only.
 
-The model, project, and branch lines are independent of `usage.yaml` entirely -- the model is detected by the bridge snapshotting the *selected* session's tmux pane every few seconds (`config/bridge.yaml`'s `model_poll_interval_seconds`), so it's only available once you've got that session running via `macropad-sessions` (below); the project line is just that key's `label` from `config/keymap.yaml`, so it's available as soon as the key is configured; the branch line runs `git branch --show-current` against the key's `project_path` on the same poll interval, so it's available as soon as that path is a git repo (no running session required).
+The model, project, and branch lines are independent of `usage.yaml` entirely -- the model is detected by the bridge snapshotting the *selected* session's pane every few seconds (`config/bridge.yaml`'s `model_poll_interval_seconds`), so it's only available once you've got that session running via `macropad-sessions` (below); the project line is just that key's `label` from `config/keymap.yaml`, so it's available as soon as the key is configured; the branch line runs `git branch --show-current` against the key's `project_path` on the same poll interval, so it's available as soon as that path is a git repo (no running session required).
 
 ## Action keys: steering a session
 
@@ -113,9 +113,9 @@ actions:
     models: [sonnet, opus, haiku]
 ```
 
-This works by running each session inside a named `tmux` pane rather than trying to guess/focus the right terminal window (which has no reliable cross-platform way to do). `uv run macropad-sessions` starts a tmux pane per configured key and launches the agent inside it -- `claude --remote-control "<label>"` for Claude Code, so you can also review or steer it from `claude.ai/code` or the Claude mobile app, not just the physical pad. Requires `tmux` installed and, for Remote Control, a Pro/Max/Team/Enterprise plan. It's safe (and normal) to re-run `macropad-sessions` any time -- see [docs/running-sessions.md](docs/running-sessions.md) for starting/cleaning up sessions, and [docs/customization.md](docs/customization.md#wiring-action-keys-to-a-live-session-tmux--remote-control) for the full setup.
+This works by running each session inside a named pane rather than trying to guess/focus the right terminal window (which has no reliable cross-platform way to do) -- `tmux` by default, or [herdr](https://herdr.dev) (an agent-aware multiplexer purpose-built for this) if you set `config/bridge.yaml`'s `session_backend: herdr`. `uv run macropad-sessions` starts a pane per configured key and launches the agent inside it -- `claude --remote-control "<label>"` for Claude Code, so you can also review or steer it from `claude.ai/code` or the Claude mobile app, not just the physical pad. Requires the configured backend's CLI installed (`tmux`, or `herdr`) and, for Remote Control, a Pro/Max/Team/Enterprise plan. It's safe (and normal) to re-run `macropad-sessions` any time -- see [docs/running-sessions.md](docs/running-sessions.md) for starting/cleaning up sessions and comparing the two backends, and [docs/customization.md](docs/customization.md#wiring-action-keys-to-a-live-session-tmuxherdr--remote-control) for the full setup.
 
-To actually *look at* whichever session is currently selected without repeatedly typing `tmux attach -t macropad-key<N>`, run `uv run macropad-sessions --follow` once and leave it attached in a spare terminal/pane -- it live-follows the encoder, updating in place every time you rotate the knob (`macropad-bridge` keeps it re-pointed via `tmux link-window`). See [docs/running-sessions.md](docs/running-sessions.md#auto-following-the-encoder-selection-macropad-follow).
+To actually *look at* whichever session is currently selected without repeatedly reattaching by hand, run `uv run macropad-sessions --follow` once and leave it attached in a spare terminal/pane -- it live-follows the encoder, updating in place every time you rotate the knob (`macropad-bridge` keeps it in sync -- `tmux link-window` or `herdr workspace focus`, depending on `session_backend`). See [docs/running-sessions.md](docs/running-sessions.md#auto-following-the-encoder-selection).
 
 `type: cycle_model` action keys send Claude Code's own `/model <name>` command, advancing through `models:` one press at a time -- the OLED's model line above picks up the change within a few seconds.
 
@@ -151,7 +151,7 @@ Then open **http://127.0.0.1:8787**. It's a visual editor for LED colors, action
 - [docs/agent-integration.md](docs/agent-integration.md) -- how hook events become LED colors
 - [docs/customization.md](docs/customization.md) -- keymap / colors / bridge settings
 - [docs/running-the-bridge.md](docs/running-the-bridge.md) -- running `macropad-bridge` manually or as a service
-- [docs/running-sessions.md](docs/running-sessions.md) -- starting/cleaning up the `tmux` sessions action keys route into
+- [docs/running-sessions.md](docs/running-sessions.md) -- starting/cleaning up the sessions (tmux or herdr) action keys route into
 - [docs/troubleshooting.md](docs/troubleshooting.md) -- common problems, including updating firmware reliably over WSL
 
 ## Repo layout
@@ -167,7 +167,8 @@ macropad/            host-side Python package
           voice.py               mic recording (sounddevice) + stt backend dispatch
           stt/                   pluggable STT backends (local, OpenAI, Together)
   bridge.py            the background daemon (macropad-bridge)
-  sessions.py           tmux + `claude --remote-control` launcher (macropad-sessions), model detection
+  sessions.py           tmux/herdr + `claude --remote-control` launcher (macropad-sessions), model detection
+  session_backends/     the two multiplexer backends sessions.py dispatches to (tmux.py, herdr.py)
   firmware_flash.py       pushes firmware/*.py over the serial REPL (macropad-flash) -- see docs/troubleshooting.md
   client.py            tiny client hooks use to talk to the daemon
   setup_cli.py          the interactive `macropad-setup` command

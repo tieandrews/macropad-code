@@ -48,13 +48,25 @@ class ReconnectingSerial:
     `on_line(line)` for each one. Never raises into the caller; parsing
     and dispatch errors are swallowed so a malformed line from the board
     can't kill the bridge.
+
+    If `on_connect` is given, it's called (from the reconnect thread)
+    every time a new connection is established -- including the first
+    one and every reconnect after an unplug/sleep/reset -- so callers can
+    re-sync anything that's only pushed on-change rather than polled
+    (e.g. macropad-bridge asking the board to re-announce its current
+    encoder selection, since the board itself has no reason to repeat a
+    `{"selected": N}` it already sent once, and the bridge would
+    otherwise silently keep assuming key 0 until the next physical
+    rotation/press -- see Bridge._on_serial_connect()).
     """
 
     def __init__(self, baudrate: int = 115200, retry_seconds: float = 2.0,
-                 on_line: Optional[Callable[[str], None]] = None):
+                 on_line: Optional[Callable[[str], None]] = None,
+                 on_connect: Optional[Callable[[], None]] = None):
         self.baudrate = baudrate
         self.retry_seconds = retry_seconds
         self._on_line = on_line
+        self._on_connect = on_connect
         self._ser: Optional[serial.Serial] = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -80,6 +92,11 @@ class ReconnectingSerial:
                         with self._lock:
                             self._ser = ser
                         print(f"[macropad-bridge] connected to {port}", flush=True)
+                        if self._on_connect is not None:
+                            try:
+                                self._on_connect()
+                            except Exception as exc:  # noqa: BLE001 -- never let this kill reconnect
+                                print(f"[macropad-bridge] on_connect handler failed: {exc}", flush=True)
             self._stop.wait(self.retry_seconds)
 
     def _read_loop(self) -> None:

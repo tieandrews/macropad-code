@@ -14,6 +14,26 @@ _CHUNK_FRAMES = 1024
 ChunkCallback = Callable[[object], None]
 
 
+def warm_up() -> None:
+    """Best-effort: opens and immediately closes a throwaway InputStream,
+    so the PortAudio/host-audio-API cold-start cost (measured ~150ms on
+    macOS/CoreAudio, vs. ~40ms for a subsequent open) is paid once here
+    at bridge startup instead of on the user's first mic press. Call
+    this from a background thread -- it can block briefly on slow
+    hardware/drivers, and bridge startup shouldn't wait on it. Silently
+    does nothing if sounddevice/PortAudio aren't available; that failure
+    surfaces the normal way on an actual recording attempt instead."""
+    try:
+        import sounddevice as sd
+
+        stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32")
+        stream.start()
+        stream.stop()
+        stream.close()
+    except Exception:
+        pass
+
+
 class Recorder:
     """Accumulates microphone frames between `start()` and `stop()`.
     Optionally calls `on_chunk` with each float32 mono frame for live
