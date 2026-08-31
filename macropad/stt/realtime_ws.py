@@ -94,6 +94,7 @@ class RealtimeWebSocketBackend:
 
         with self._lock:
             self._ws = ws
+        print(f"[macropad-stt] realtime WebSocket connected ({self._url})", flush=True)
 
         self._stop_recv.clear()
         self._recv_thread = threading.Thread(target=self._recv_loop, daemon=True)
@@ -131,12 +132,29 @@ class RealtimeWebSocketBackend:
             print(f"[macropad-stt] audio append failed: {exc}", flush=True)
 
     def _recv_loop(self) -> None:
+        import websocket
+
         while not self._stop_recv.is_set() and self._ws is not None:
             try:
                 self._ws.settimeout(0.5)
                 raw = self._ws.recv()
-            except Exception:
+            except websocket.WebSocketTimeoutException:
+                # Expected: just means no message arrived within the 0.5s
+                # poll window -- not an error, keep waiting.
                 continue
+            except Exception as exc:
+                # Anything else (connection closed, network drop, ...) is
+                # fatal to this connection -- previously this was a bare
+                # `except: continue`, which silently spun forever doing
+                # nothing on a dropped connection: no error, no deltas,
+                # nothing ever landing, and nothing to see in the logs
+                # either. Log it and stop cleanly instead of hanging
+                # around pretending everything's fine.
+                if self._stop_recv.is_set():
+                    break  # close() already tore this down on purpose
+                print(f"[macropad-stt] realtime connection lost: {exc}", flush=True)
+                self.close()
+                return
             if not raw:
                 continue
             try:

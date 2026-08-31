@@ -90,6 +90,7 @@ class Bridge:
         self._recorder = None
         self._stt = None
         self._streamed_chars = 0
+        self._streamed_preview = ""
         # Voice press/release/review state machine -- see _on_voice_press
         # and _on_voice_release. "idle": nothing happening.
         # "recording_undecided": press just happened, haven't seen the
@@ -498,6 +499,13 @@ class Bridge:
             return False
 
         self._streamed_chars = 0
+        # Accumulated purely for the final log line in _stop_voice() below
+        # -- lets you actually see what (if anything) got sent, instead of
+        # the old unconditional "(streamed)" placeholder that looked like
+        # success even when nothing was ever typed (e.g. a dead
+        # connection producing zero deltas -- see realtime_ws.py's
+        # _recv_loop fix).
+        self._streamed_preview = ""
         backend = self._voice_settings.get("backend", "local_whisper")
         streaming = getattr(self._stt, "streaming", False)
 
@@ -511,12 +519,16 @@ class Bridge:
                     return
                 sessions.send_to_session(session_key, delta, send_enter=False)
                 self._streamed_chars += len(delta)
+                self._streamed_preview += delta
+                print(f"[macropad-bridge] voice delta ({len(delta)} chars): {delta!r}",
+                      flush=True)
 
             def on_completed(transcript: str) -> None:
                 remainder = transcript[self._streamed_chars :]
                 if remainder:
                     sessions.send_to_session(session_key, remainder, send_enter=False)
                     self._streamed_chars += len(remainder)
+                    self._streamed_preview += remainder
 
             # Start the mic capturing *before* the streaming backend's
             # handshake (a real network round-trip -- e.g. a WebSocket
@@ -607,7 +619,27 @@ class Bridge:
                     remainder = text[self._streamed_chars :]
                     if remainder:
                         sessions.send_to_session(session_key, remainder, send_enter=False)
-                got_text = True
+                        self._streamed_preview += remainder
+                # Only "got" text if something was actually streamed --
+                # previously this was unconditionally True, which made a
+                # dead connection (zero deltas ever received) look
+                # identical to a real successful transcription in the
+                # log, right down to "sent". See _start_voice()'s
+                # _streamed_preview for the same reasoning.
+                got_text = bool(self._streamed_preview)
+                if not got_text:
+                    # Nothing was ever actually streamed -- a dead/never-
+                    # connected WebSocket, or genuine silence -- same
+                    # "nothing to submit" outcome as the non-streaming
+                    # branch below, so treat it identically rather than
+                    # pressing Enter on an empty input box and logging a
+                    # misleading "sent".
+                    print("[macropad-bridge] voice capture produced no usable transcription "
+                          "(streaming backend never sent a delta -- check for a "
+                          "'[macropad-stt]' connect/error line above)", flush=True)
+                    self._voice_state = "idle"
+                    self._push_mic_led()
+                    return
             elif text:
                 sessions.send_to_session(session_key, text, send_enter=False)
                 got_text = True
@@ -627,7 +659,7 @@ class Bridge:
                 self._voice_state = "pending_review"
             self._push_mic_led()
             status = "sent" if ok else "failed (no session running for the selected key?)"
-            shown = text or "(streamed)"
+            shown = self._streamed_preview if streaming else (text or "")
             suffix = "" if auto_enter else " (pending review -- tap mic again to submit)"
             print(f"[macropad-bridge] voice -> session key={session_key} {status}: "
                   f"\"{shown}\"{suffix}", flush=True)
