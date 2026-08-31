@@ -12,6 +12,14 @@
 host: "127.0.0.1"
 port: 9999
 
+# Which terminal multiplexer macropad-sessions uses to run and route
+# keystrokes into each configured project's agent session -- see
+# docs/running-sessions.md for how the two compare and how to switch.
+#   tmux    (default) -- battle-tested, works everywhere tmux does
+#   herdr   -- https://herdr.dev, an agent-aware multiplexer purpose-built
+#              for exactly this kind of external session orchestration
+session_backend: herdr
+
 # Serial connection to the MacroPad itself.
 serial:
   baudrate: 115200
@@ -41,11 +49,6 @@ voice:
   # control again (encoder or voice_toggle key) to submit it. The mic
   # key's LED (if configured) turns amber while a transcript is pending.
   auto_enter: true
-
-  # Safety net for hands-free recording (a quick tap, or an errant
-  # button press): auto-stops and transcribes after this many seconds
-  # even if nothing ever taps the mic again. Set to 0/null to disable.
-  max_recording_seconds: 600
 
   # Backend (pick one):
   #   local_whisper       offline faster-whisper (slow on CPU, no API key)

@@ -29,11 +29,17 @@ keys:
     label: emexams-remix
     agent: claude
     project_path: /Users/tya/projects_tmp/emexams-remix
-    permission_mode: auto
+    permission_mode: bypassPermissions
   2:
     label: emexams-website
     agent: claude
     project_path: /Users/tya/projects_tmp/emexams-website
+    permission_mode: bypassPermissions
+  3:
+    label: dotfiles
+    agent: claude
+    project_path: /Users/tya/projects_tmp/dotfiles
+    permission_mode: bypassPermissions
 
 # Keys 3-5 are intentionally left unconfigured -- their LEDs stay off
 # (including while selected/pulsing) until you add an entry here.
@@ -122,7 +128,6 @@ keys:
 #     label: New chat
 #     send_keys: "/clear"
 #     color: [255, 140, 0]   # orange
-    permission_mode: bypassPermissions
 actions:
   6:
     label: Approve

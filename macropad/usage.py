@@ -123,11 +123,11 @@ def _pct(tokens: int, budget: Optional[int]) -> Optional[int]:
 
 
 def _labels(settings: dict) -> tuple:
-    """Compact metric labels for the OLED's two-line usage dashboard --
-    just "5H"/"7D", not "SESSION 5H"/"WEEK 7D": with only ~21 characters
-    per line, and the row position itself already distinguishing session
-    from weekly, spelling that out again wastes space better spent on
-    the bar."""
+    """Compact metric labels for the OLED's one-line usage summary --
+    just "5H"/"7D", not "SESSION 5H"/"WEEK 7D": both metrics share a
+    single ~21-character line (see firmware/code.py's
+    _apply_usage_message()), so a longer label would crowd out the
+    percentage itself."""
     session_hours = settings.get("session_window_hours", 5)
     weekly_days = settings.get("weekly_window_days", 7)
     return f"{session_hours:g}H", f"{weekly_days:g}D"

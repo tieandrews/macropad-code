@@ -60,18 +60,20 @@ rotate the encoder, or press a session key (0-5) directly
                     -> firmware/code.py brightens the "selected" key's LED locally
                     -> sends {"selected": N} to the bridge over serial
                     -> macropad/sessions.py's sync_follow_session() re-points the
-                       shared macropad-follow tmux session at macropad-key<N>
-                       (see docs/running-sessions.md) via `tmux link-window`
+                       shared follow view at macropad-key<N> (see
+                       docs/running-sessions.md) -- `tmux link-window` for the
+                       tmux backend, `herdr workspace focus` for herdr
 
 press an action key -> firmware/code.py sends {"action": N} to the bridge over serial
    -> macropad/bridge.py looks up N in config/keymap.yaml's `actions:`
-   -> macropad/sessions.py runs `tmux send-keys` into the *selected* session's
-      tmux pane (macropad-key<selected>)
+   -> macropad/sessions.py sends the configured keys into the *selected*
+      session's pane (macropad-key<selected>), via whichever session_backend
+      config/bridge.yaml selects (tmux or herdr)
    -> whatever agent is running in that pane (started by `macropad-sessions`,
       e.g. `claude --remote-control`) receives it as if you'd typed it
 ```
 
-The bridge only ever tracks the *last* `{"selected": N}` it saw -- there's no round trip back to the firmware to confirm it, so this is fire-and-forget in both directions, matching every other message in this repo. See [customization.md](customization.md#action-keys-6-11---actions) for configuring what each action key sends, and [customization.md](customization.md#wiring-action-keys-to-a-live-session-tmux--remote-control) for the tmux setup this depends on.
+The bridge only ever tracks the *last* `{"selected": N}` it saw -- there's no round trip back to the firmware to confirm it, so this is fire-and-forget in both directions, matching every other message in this repo. See [customization.md](customization.md#action-keys-6-11---actions) for configuring what each action key sends, and [customization.md](customization.md#wiring-action-keys-to-a-live-session-tmuxherdr--remote-control) for the session setup this depends on.
 
 `type: cycle_model` action keys follow the same path, except `macropad/bridge.py` sends `/model <name>` (advancing through a configured rotation) instead of a literal `send_keys` string -- see [customization.md](customization.md#action-keys-6-11---actions).
 
@@ -89,7 +91,7 @@ press the encoder -> firmware/code.py sends {"encoder_press": true} to the bridg
       session, same path as an action key
 ```
 
-Separately, a small poller in `macropad/bridge.py` runs on its own timer (independent of both the usage-display poller and hook events): it snapshots the *selected* session's tmux pane, pattern-matches Claude Code's model name out of it (`macropad/sessions.py`'s `detect_model()`), and sends `{"model": "..."}` to the board whenever it changes -- also triggered immediately on `{"selected": N}` so switching sessions doesn't leave a stale model name showing. The OLED's third line always shows the model name -- `{"recording": ...}` no longer overlays it, it renders on its own bottom line instead (see above) so voice-input state is unambiguous without hiding the model.
+Separately, a small poller in `macropad/bridge.py` runs on its own timer (independent of both the usage-display poller and hook events): it snapshots the *selected* session's pane, pattern-matches Claude Code's model name out of it (`macropad/sessions.py`'s `detect_model()`), and sends `{"model": "..."}` to the board whenever it changes -- also triggered immediately on `{"selected": N}` so switching sessions doesn't leave a stale model name showing. The OLED's third line always shows the model name -- `{"recording": ...}` no longer overlays it, it renders on its own bottom line instead (see above) so voice-input state is unambiguous without hiding the model.
 
 That same poller (and the `{"selected": N}` handler) also send `{"label": "..."}` -- the selected key's `label` from `config/keymap.yaml` -- which the board renders on its own fourth OLED line, independent of the model line above it and the mic status line below it.
 

@@ -19,12 +19,13 @@ firmware/code.py):
     (0-5) is selected -- also triggers an immediate model-name refresh
     for the OLED, rather than waiting for the next poll.
   - `{"action": N}` when an action key (6-11) is pressed -- routed into
-    the selected session's tmux pane via macropad/sessions.py.
+    the selected session's pane via macropad/sessions.py (tmux or herdr,
+    whichever config/bridge.yaml's `session_backend` selects).
   - `{"encoder_press": true}` when the encoder's push-button is
     pressed -- toggles voice-to-text recording on/off (macropad/voice.py).
 
 A second background poller periodically snapshots the selected
-session's tmux pane to detect which Claude Code model it's using, and
+session's pane to detect which Claude Code model it's using, and
 pushes `{"model": "..."}` to the OLED -- independent of the usage-display
 poller above.
 
@@ -65,7 +66,8 @@ class Bridge:
         self.host = host
         self.port = port
         self.link = ReconnectingSerial(
-            baudrate=baudrate, retry_seconds=retry_seconds, on_line=self._on_board_line
+            baudrate=baudrate, retry_seconds=retry_seconds, on_line=self._on_board_line,
+            on_connect=self._on_serial_connect,
         )
         self._server = socketserver.ThreadingTCPServer((host, port), _Handler)
         self._server.daemon_threads = True
@@ -73,6 +75,9 @@ class Bridge:
         self._usage_stop = threading.Event()
         self._usage_thread: threading.Thread | None = None
         self._selected_key = 0
+        # Which key the follow view was last successfully re-pointed at
+        # -- see _sync_follow_if_needed().
+        self._follow_synced_key: int | None = None
 
         self._model_poll_interval = model_poll_interval_seconds
         self._model_stop = threading.Event()
@@ -85,6 +90,7 @@ class Bridge:
         self._recorder = None
         self._stt = None
         self._streamed_chars = 0
+        self._streamed_preview = ""
         # Voice press/release/review state machine -- see _on_voice_press
         # and _on_voice_release. "idle": nothing happening.
         # "recording_undecided": press just happened, haven't seen the
@@ -124,6 +130,28 @@ class Bridge:
             return
         self._key_states[key] = state
         self._push_key_state(key, state)
+
+    def _sync_follow_if_needed(self) -> None:
+        """Re-points the follow view at the selected session, but only
+        when the selection has actually changed since the last
+        successful sync -- not unconditionally on every call. This is
+        piggybacked on the model-poll loop below (every
+        model_poll_interval_seconds) purely as a self-heal for a sync
+        that raced something at startup and silently failed; calling it
+        unconditionally there used to mean the follow view got yanked
+        back to the macropad's selection every few seconds even if you
+        never touched the pad, since sessions.sync_follow_session()
+        forces focus back to a specific session regardless of where a
+        session_backend's own UI had navigated to in the meantime -- an
+        annoyance under tmux too, but much more noticeable with herdr's
+        clickable sidebar. Leaves self._follow_synced_key unset (so the
+        next call retries) if the sync itself fails."""
+        from . import sessions
+
+        if self._selected_key == self._follow_synced_key:
+            return
+        if sessions.sync_follow_session(self._selected_key):
+            self._follow_synced_key = self._selected_key
 
     def _push_key_state(self, key: int, state: str) -> bool:
         """Resolves `state` to a color/pulse via the currently-loaded
@@ -203,11 +231,23 @@ class Bridge:
         print(f"[macropad-bridge] config reloaded (voice + encoder settings, "
               f"{len(self._key_states)} key LED(s) refreshed)", flush=True)
 
+    def _on_serial_connect(self) -> None:
+        """Called by ReconnectingSerial every time the serial link comes
+        up -- including a bridge restart with the physical board already
+        sitting on some other key. self._selected_key otherwise starts
+        every bridge process at 0 with no way to learn better, since the
+        board only sends `{"selected": N}` on an actual rotation/press,
+        never proactively -- silently routing action keys/voice input
+        into the wrong session until you happened to touch the pad. Asks
+        the board to re-announce its current selection instead of
+        guessing; firmware/code.py answers with {"selected": N} on the
+        very next line, handled the same as a real rotation by
+        _on_board_line() below."""
+        self.link.write_line(json.dumps({"request_selected": True}))
+
     def _on_board_line(self, line: str) -> None:
         """Handles a message the *board* sent us: encoder selection
         changes and action-key presses -- see firmware/code.py."""
-        from . import sessions
-
         if not line:
             return
         try:
@@ -227,7 +267,7 @@ class Bridge:
             self._poll_model_once()  # don't make the user wait for the next scheduled poll
             self._poll_branch_once()
             self._push_effort_to_oled()
-            sessions.sync_follow_session(self._selected_key)
+            self._sync_follow_if_needed()
             return
 
         if "action" in msg:
@@ -311,7 +351,7 @@ class Bridge:
         ok = sessions.send_to_session(
             self._selected_key, entry.get("send_keys", ""), entry.get("enter", True)
         )
-        status = "sent" if ok else "failed (no tmux session running for the selected key?)"
+        status = "sent" if ok else "failed (no session running for the selected key?)"
         print(f"[macropad-bridge] action='{label}' -> session key={self._selected_key} {status}",
               flush=True)
 
@@ -325,7 +365,7 @@ class Bridge:
         next_model = models[index]
 
         ok = sessions.send_to_session(key, f"/model {next_model}", True)
-        status = "sent" if ok else "failed (no tmux session running for the selected key?)"
+        status = "sent" if ok else "failed (no session running for the selected key?)"
         print(f"[macropad-bridge] action='{label}' -> session key={key} switching to "
               f"'{next_model}' {status}", flush=True)
         if ok:
@@ -351,8 +391,8 @@ class Bridge:
         """Shared by the cycle_effort action key and encoder rotation (in
         effort mode) -- advances `key`'s effort-level position by `step`
         and sends `/effort <level>` into its session. There's no way to
-        detect Claude Code's *actual* current effort level from the tmux
-        pane (unlike model name -- see sessions.detect_model()), so
+        detect Claude Code's *actual* current effort level from the
+        session's pane (unlike model name -- see sessions.detect_model()), so
         self._last_sent_effort only reflects what this bridge itself has
         sent since it started, not ground truth."""
         from . import sessions
@@ -364,7 +404,7 @@ class Bridge:
         next_level = levels[index]
 
         ok = sessions.send_to_session(key, f"/effort {next_level}", True)
-        status = "sent" if ok else "failed (no tmux session running for the selected key?)"
+        status = "sent" if ok else "failed (no session running for the selected key?)"
         print(f"[macropad-bridge] {trigger} -> session key={key} switching effort to "
               f"'{next_level}' {status}", flush=True)
         if ok:
@@ -440,7 +480,7 @@ class Bridge:
         if key is None:
             return
         ok = sessions.send_to_session(key, "", send_enter=True)
-        status = "sent" if ok else "failed (no tmux session running for the selected key?)"
+        status = "sent" if ok else "failed (no session running for the selected key?)"
         print(f"[macropad-bridge] voice transcript confirmed ({trigger}) -> session key={key} "
               f"{status}", flush=True)
 
@@ -459,6 +499,13 @@ class Bridge:
             return False
 
         self._streamed_chars = 0
+        # Accumulated purely for the final log line in _stop_voice() below
+        # -- lets you actually see what (if anything) got sent, instead of
+        # the old unconditional "(streamed)" placeholder that looked like
+        # success even when nothing was ever typed (e.g. a dead
+        # connection producing zero deltas -- see realtime_ws.py's
+        # _recv_loop fix).
+        self._streamed_preview = ""
         backend = self._voice_settings.get("backend", "local_whisper")
         streaming = getattr(self._stt, "streaming", False)
 
@@ -472,12 +519,16 @@ class Bridge:
                     return
                 sessions.send_to_session(session_key, delta, send_enter=False)
                 self._streamed_chars += len(delta)
+                self._streamed_preview += delta
+                print(f"[macropad-bridge] voice delta ({len(delta)} chars): {delta!r}",
+                      flush=True)
 
             def on_completed(transcript: str) -> None:
                 remainder = transcript[self._streamed_chars :]
                 if remainder:
                     sessions.send_to_session(session_key, remainder, send_enter=False)
                     self._streamed_chars += len(remainder)
+                    self._streamed_preview += remainder
 
             # Start the mic capturing *before* the streaming backend's
             # handshake (a real network round-trip -- e.g. a WebSocket
@@ -568,7 +619,27 @@ class Bridge:
                     remainder = text[self._streamed_chars :]
                     if remainder:
                         sessions.send_to_session(session_key, remainder, send_enter=False)
-                got_text = True
+                        self._streamed_preview += remainder
+                # Only "got" text if something was actually streamed --
+                # previously this was unconditionally True, which made a
+                # dead connection (zero deltas ever received) look
+                # identical to a real successful transcription in the
+                # log, right down to "sent". See _start_voice()'s
+                # _streamed_preview for the same reasoning.
+                got_text = bool(self._streamed_preview)
+                if not got_text:
+                    # Nothing was ever actually streamed -- a dead/never-
+                    # connected WebSocket, or genuine silence -- same
+                    # "nothing to submit" outcome as the non-streaming
+                    # branch below, so treat it identically rather than
+                    # pressing Enter on an empty input box and logging a
+                    # misleading "sent".
+                    print("[macropad-bridge] voice capture produced no usable transcription "
+                          "(streaming backend never sent a delta -- check for a "
+                          "'[macropad-stt]' connect/error line above)", flush=True)
+                    self._voice_state = "idle"
+                    self._push_mic_led()
+                    return
             elif text:
                 sessions.send_to_session(session_key, text, send_enter=False)
                 got_text = True
@@ -587,8 +658,8 @@ class Bridge:
                 self._voice_pending_session_key = session_key
                 self._voice_state = "pending_review"
             self._push_mic_led()
-            status = "sent" if ok else "failed (no tmux session running for the selected key?)"
-            shown = text or "(streamed)"
+            status = "sent" if ok else "failed (no session running for the selected key?)"
+            shown = self._streamed_preview if streaming else (text or "")
             suffix = "" if auto_enter else " (pending review -- tap mic again to submit)"
             print(f"[macropad-bridge] voice -> session key={session_key} {status}: "
                   f"\"{shown}\"{suffix}", flush=True)
@@ -714,9 +785,7 @@ class Bridge:
                 self._push_voice_key()
                 self._push_mic_led()
                 self._resync_session_leds()  # catches any key dropped by a startup serial race
-                from . import sessions
-
-                sessions.sync_follow_session(self._selected_key)
+                self._sync_follow_if_needed()
             except Exception as exc:  # best-effort: never let model polling kill the bridge
                 print(f"[macropad-bridge] model poll failed: {exc}", flush=True)
             self._model_stop.wait(self._model_poll_interval)
@@ -774,7 +843,7 @@ class Bridge:
 
     def _resync_session_leds(self, force: bool = False) -> None:
         """Makes every session key's (0-5) LED match reality: `waiting`
-        for a key with a live tmux session, `idle` for a key that's
+        for a key with a live session, `idle` for a key that's
         unconfigured or whose session isn't running. This matters
         because the MacroPad's NeoPixels have no memory of their own on
         the *host* side -- they hold whatever color they were last told
@@ -820,9 +889,14 @@ class Bridge:
         self._push_mic_led()
         self._resync_session_leds()
         self._push_action_key_colors()
-        from . import sessions
+        self._sync_follow_if_needed()
+        if self._voice_settings.get("enabled", False):
+            # Pays PortAudio's one-time cold-start cost now instead of on
+            # the user's first mic press -- see voice.warm_up(). Off the
+            # main thread since it can block briefly on slow hardware.
+            from . import voice
 
-        sessions.sync_follow_session(self._selected_key)
+            threading.Thread(target=voice.warm_up, daemon=True).start()
         self.start_usage_poller()
         self.start_model_poller()
         try:
